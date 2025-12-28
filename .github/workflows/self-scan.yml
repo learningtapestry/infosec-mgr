@@ -1,0 +1,33 @@
+name: Self Security Scan
+
+# Dogfood: This repo scans itself using its own workflows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run weekly on Mondays at 9am UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  semgrep:
+    name: Semgrep SAST
+    uses: ./.github/workflows/semgrep.yml
+    with:
+      product_name: 'learningtapestry/infosec-mgr'
+    secrets:
+      DEFECTDOJO_URL: ${{ secrets.DEFECTDOJO_URL }}
+      DEFECTDOJO_TOKEN: ${{ secrets.DEFECTDOJO_TOKEN }}
+
+  trivy:
+    name: Trivy Scan
+    uses: ./.github/workflows/trivy.yml
+    with:
+      product_name: 'learningtapestry/infosec-mgr'
+      scan_type: 'fs'
+    secrets:
+      DEFECTDOJO_URL: ${{ secrets.DEFECTDOJO_URL }}
+      DEFECTDOJO_TOKEN: ${{ secrets.DEFECTDOJO_TOKEN }}

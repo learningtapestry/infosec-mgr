@@ -1,0 +1,100 @@
+name: Trivy Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      product_name:
+        description: 'Product name in DefectDojo (defaults to repository name)'
+        required: false
+        type: string
+        default: ''
+      scan_type:
+        description: 'Trivy scan type: fs (filesystem), image, or repo'
+        required: false
+        type: string
+        default: 'fs'
+      image_ref:
+        description: 'Container image to scan (required if scan_type is image)'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      DEFECTDOJO_URL:
+        required: true
+      DEFECTDOJO_TOKEN:
+        required: true
+
+jobs:
+  trivy:
+    name: Trivy Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        if: inputs.scan_type == 'fs'
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'json'
+          output: 'trivy-results.json'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
+
+      - name: Run Trivy image scan
+        if: inputs.scan_type == 'image'
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'image'
+          image-ref: ${{ inputs.image_ref }}
+          format: 'json'
+          output: 'trivy-results.json'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
+
+      - name: Run Trivy repo scan
+        if: inputs.scan_type == 'repo'
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'repo'
+          scan-ref: '.'
+          format: 'json'
+          output: 'trivy-results.json'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
+
+      - name: Determine product name
+        id: product
+        run: |
+          if [ -n "${{ inputs.product_name }}" ]; then
+            echo "name=${{ inputs.product_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${{ github.repository }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload to DefectDojo
+        if: always()
+        run: |
+          if [ -f trivy-results.json ]; then
+            curl -X POST "${{ secrets.DEFECTDOJO_URL }}/api/v2/import-scan/" \
+              -H "Authorization: Token ${{ secrets.DEFECTDOJO_TOKEN }}" \
+              -F "scan_type=Trivy Scan" \
+              -F "product_name=${{ steps.product.outputs.name }}" \
+              -F "engagement_name=CI/CD Scan" \
+              -F "auto_create_context=true" \
+              -F "verified=false" \
+              -F "active=true" \
+              -F "file=@trivy-results.json" \
+              --fail-with-body || echo "Warning: Failed to upload to DefectDojo"
+          else
+            echo "No Trivy results file found"
+          fi
+
+      - name: Upload results artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-results
+          path: trivy-results.json
+          retention-days: 30
+          if-no-files-found: ignore

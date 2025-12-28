@@ -1,0 +1,52 @@
+name: Full Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      product_name:
+        description: 'Product name in DefectDojo (defaults to repository name)'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      DEFECTDOJO_URL:
+        required: true
+      DEFECTDOJO_TOKEN:
+        required: true
+
+jobs:
+  semgrep:
+    name: SAST (Semgrep)
+    uses: learningtapestry/infosec-mgr/.github/workflows/semgrep.yml@main
+    with:
+      product_name: ${{ inputs.product_name }}
+    secrets:
+      DEFECTDOJO_URL: ${{ secrets.DEFECTDOJO_URL }}
+      DEFECTDOJO_TOKEN: ${{ secrets.DEFECTDOJO_TOKEN }}
+
+  trivy:
+    name: Dependencies (Trivy)
+    uses: learningtapestry/infosec-mgr/.github/workflows/trivy.yml@main
+    with:
+      product_name: ${{ inputs.product_name }}
+      scan_type: 'fs'
+    secrets:
+      DEFECTDOJO_URL: ${{ secrets.DEFECTDOJO_URL }}
+      DEFECTDOJO_TOKEN: ${{ secrets.DEFECTDOJO_TOKEN }}
+
+  summary:
+    name: Scan Summary
+    runs-on: ubuntu-latest
+    needs: [semgrep, trivy]
+    if: always()
+    steps:
+      - name: Summary
+        run: |
+          echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Scan | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Semgrep (SAST) | ${{ needs.semgrep.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trivy (Dependencies) | ${{ needs.trivy.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Results uploaded to DefectDojo." >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,77 @@
+name: Semgrep Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      product_name:
+        description: 'Product name in DefectDojo (defaults to repository name)'
+        required: false
+        type: string
+        default: ''
+      semgrep_config:
+        description: 'Semgrep configuration (default: auto)'
+        required: false
+        type: string
+        default: 'auto'
+    secrets:
+      DEFECTDOJO_URL:
+        required: true
+      DEFECTDOJO_TOKEN:
+        required: true
+
+jobs:
+  semgrep:
+    name: Semgrep SAST
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v2
+        with:
+          config: ${{ inputs.semgrep_config }}
+        env:
+          SEMGREP_RULES: ${{ inputs.semgrep_config }}
+
+      - name: Export Semgrep results
+        run: |
+          semgrep scan --config ${{ inputs.semgrep_config }} --json --output semgrep-results.json . || true
+        continue-on-error: true
+
+      - name: Determine product name
+        id: product
+        run: |
+          if [ -n "${{ inputs.product_name }}" ]; then
+            echo "name=${{ inputs.product_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${{ github.repository }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload to DefectDojo
+        if: always()
+        run: |
+          if [ -f semgrep-results.json ]; then
+            curl -X POST "${{ secrets.DEFECTDOJO_URL }}/api/v2/import-scan/" \
+              -H "Authorization: Token ${{ secrets.DEFECTDOJO_TOKEN }}" \
+              -F "scan_type=Semgrep JSON Report" \
+              -F "product_name=${{ steps.product.outputs.name }}" \
+              -F "engagement_name=CI/CD Scan" \
+              -F "auto_create_context=true" \
+              -F "verified=false" \
+              -F "active=true" \
+              -F "file=@semgrep-results.json" \
+              --fail-with-body || echo "Warning: Failed to upload to DefectDojo"
+          else
+            echo "No Semgrep results file found"
+          fi
+
+      - name: Upload results artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: semgrep-results
+          path: semgrep-results.json
+          retention-days: 30
+          if-no-files-found: ignore
