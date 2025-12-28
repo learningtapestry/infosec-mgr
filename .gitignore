@@ -148,3 +148,6 @@ docs/.devcontainer/Dockerfile
 docs/LICENSE
 docs/.hugo_build.lock
 .cursor-rules
+
+# Local scan results
+scans/

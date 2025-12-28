@@ -1,158 +1,189 @@
-# DefectDojo
+# infosec-mgr
 
-<table>
-    <tr styl="margin: 0; position: absolute; top: 50%; -ms-transform: translateY(-50%); transform: translateY(-50%);">
-        <th>
-            <a href="https://opensourcesecurityindex.io/" target="_blank" rel="noopener">
-                <img style="width: 282px; height: 56px" src="https://opensourcesecurityindex.io/badge.svg"
-                alt="Open Source Security Index - Fastest Growing Open Source Security Projects" width="282" height="56" />
-            </a>
-        </th>
-        <th>
-            <p>
-                <a href="https://www.owasp.org/index.php/OWASP_DefectDojo_Project"><img src="https://img.shields.io/badge/owasp-flagship%20project-orange.svg" alt="OWASP Flagship"></a>
-                <a href="https://github.com/DefectDojo/django-DefectDojo/releases/latest"><img src="https://img.shields.io/github/release/DefectDojo/django-DefectDojo.svg" alt="GitHub release"></a>
-                <a href="https://www.youtube.com/channel/UCWw9qzqptiIvTqSqhOFuCuQ"><img src="https://img.shields.io/badge/youtube-subscribe-%23c4302b.svg" alt="YouTube Subscribe"></a>
-                <a href="https://twitter.com/defectdojo/"><img src="https://img.shields.io/twitter/follow/defectdojo.svg?style=social&amp;label=Follow" alt="Twitter Follow"></a>
-            </p>
-            <p>
-                <a href="https://github.com/DefectDojo/django-DefectDojo/actions"><img src="https://github.com/DefectDojo/django-DefectDojo/actions/workflows/unit-tests.yml/badge.svg?branch=master" alt="Unit Tests"></a>
-                <a href="https://github.com/DefectDojo/django-DefectDojo/actions"><img src="https://github.com/DefectDojo/django-DefectDojo/actions/workflows/integration-tests.yml/badge.svg?branch=master" alt="Integration Tests"></a>
-                <a href="https://bestpractices.coreinfrastructure.org/projects/2098"><img src="https://bestpractices.coreinfrastructure.org/projects/2098/badge" alt="CII Best Practices"></a>
-            </p>
-        </th>
-    </tr>
- </table>
+Central security infrastructure for learningtapestry - vulnerability management and reusable scan workflows.
 
-[DefectDojo](https://www.defectdojo.com/) is a DevSecOps, ASPM (application security posture management), and
-vulnerability management tool.  DefectDojo orchestrates end-to-end security testing, vulnerability tracking,
-deduplication, remediation, and reporting.
+## What This Repo Provides
 
-## Demo
+1. **DefectDojo** - Self-hosted vulnerability aggregation and management
+2. **Reusable GitHub Workflows** - Centralized scan configs that all org repos can use
 
-Pro Edition: [pro.demo.defectdojo.com](https://pro.demo.defectdojo.com)
+## Quick Start
 
-Community Edition: [demo.defectdojo.org](https://demo.defectdojo.org)
+### For Project Repos (Use Our Scan Workflows)
 
-Either demo enviornment can be logged into with username `admin` and password `1Defectdojo@demo#appsec`. Please note that the demos are publicly accessible
-and reset every day. Do not put sensitive data in the demo. An easy way to test DefectDojo is to upload some [sample scan reports](https://github.com/DefectDojo/django-DefectDojo/tree/master/unittests/scans).
+Add this to any repo to get security scanning with zero configuration:
 
-## Quick Start for Compose V2
+```yaml
+# .github/workflows/security.yml
+name: Security
+on: [push, pull_request]
 
-From July 2023 Compose V1 [stopped receiving updates](https://docs.docker.com/compose/reference/).
+jobs:
+  scan:
+    uses: learningtapestry/infosec-mgr/.github/workflows/semgrep.yml@main
+    secrets: inherit
+```
 
-Compose V2 integrates compose functions into the Docker platform, continuing to support most of the previous
-docker-compose features and flags. You can run Compose V2 by replacing the hyphen (-) with a space, using
-`docker compose` instead of `docker-compose`.
+That's it. Results flow to DefectDojo automatically.
 
-```sh
-# Clone the project
-git clone https://github.com/DefectDojo/django-DefectDojo
-cd django-DefectDojo
+### For DefectDojo (Local Development)
 
-# Check if your installed toolkit is compatible
-./docker/docker-compose-check.sh
-
-# Building Docker images
-docker compose build
-
-# Run the application
-# (see https://github.com/DefectDojo/django-DefectDojo/blob/dev/readme-docs/DOCKER.md for more info)
+```bash
+git clone https://github.com/learningtapestry/infosec-mgr.git
+cd infosec-mgr
 docker compose up -d
 
-# Obtain admin credentials. The initializer can take up to 3 minutes to run.
-# Use docker compose logs -f initializer to track its progress.
-docker compose logs initializer | grep "Admin password:"
+# Get admin password
+docker compose logs initializer | grep "Admin password"
 ```
 
-## For Docker Compose V1
+- **Web UI**: http://localhost:8080
+- **API Docs**: http://localhost:8080/api/v2/oa3/swagger-ui/
 
-You can run Compose V1 by calling `docker-compose` (by adding the hyphen (-) between `docker compose`).
+## Architecture
 
-Following commands are using original version so you might need to adjust them:
-```sh
-docker/docker-compose-check.sh
-docker/entrypoint-initializer.sh
-docker/setEnv.sh
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  learningtapestry/infosec-mgr (this repo)                          │
+│                                                                     │
+│  ┌─────────────────────────┐  ┌─────────────────────────────────┐  │
+│  │  Reusable Workflows     │  │  DefectDojo                     │  │
+│  │  .github/workflows/     │  │  (Aggregation & Management)     │  │
+│  │  ├── semgrep.yml       │  │                                 │  │
+│  │  ├── trivy.yml         │  │  - Collects all scan results    │  │
+│  │  └── full-scan.yml     │  │  - Deduplicates findings        │  │
+│  └────────────┬────────────┘  │  - Tracks remediation           │  │
+│               │               │  - Generates reports            │  │
+│               │               └─────────────────────────────────┘  │
+└───────────────┼─────────────────────────────────────────────────────┘
+                │
+    ┌───────────┴───────────┐
+    │  Other repos call:    │
+    │  uses: learningtapestry/infosec-mgr/.github/workflows/...     │
+    └───────────────────────┘
+                │
+    ┌───────────┼───────────┬───────────────────┐
+    ▼           ▼           ▼                   ▼
+┌───────┐  ┌───────┐  ┌───────────┐  ┌─────────────────┐
+│ app-1 │  │ app-2 │  │ frontend  │  │ other-projects  │
+│       │  │       │  │           │  │                 │
+│ 6 lines of YAML │  │ 6 lines   │  │ 6 lines         │
+└───────┘  └───────┘  └───────────┘  └─────────────────┘
 ```
 
-Navigate to `http://localhost:8080` to see your new instance!
+## Available Reusable Workflows
 
-## Documentation
+| Workflow | Purpose | Use Case |
+|----------|---------|----------|
+| `semgrep.yml` | Static analysis (SAST) | Find code vulnerabilities |
+| `trivy.yml` | Container & dependency scanning | Find vulnerable packages |
+| `full-security-scan.yml` | All scans combined | Comprehensive security check |
 
-* [Official Docs](https://docs.defectdojo.com/)
-* [REST APIs](https://docs.defectdojo.com/en/open_source/api-v2-docs/)
-* [Client APIs and Wrappers](https://docs.defectdojo.com/en/open_source/api-v2-docs/#clients--api-wrappers)
-* Authentication options:
-    * [OAuth2/SAML2](https://docs.defectdojo.com/en/open_source/archived_docs/integrations/social-authentication/)
-    * [LDAP](https://docs.defectdojo.com/en/open_source/ldap-authentication/)
-* [Supported tools](https://docs.defectdojo.com/en/connecting_your_tools/parsers/)
-* [How to Write Documentation Locally](/docs/README.md)
+### Using in Your Repo
 
-## Supported Installation Options
+**Minimal (just Semgrep):**
+```yaml
+name: Security
+on: [push]
+jobs:
+  scan:
+    uses: learningtapestry/infosec-mgr/.github/workflows/semgrep.yml@main
+    secrets: inherit
+```
 
-* [SaaS](https://cloud.defectdojo.com/accounts/onboarding/plg_step_1) - New UI, addittional features, includes support & supports the project
-* [Docker / Docker Compose](readme-docs/DOCKER.md)
+**Full scan (all tools):**
+```yaml
+name: Security
+on: [push]
+jobs:
+  scan:
+    uses: learningtapestry/infosec-mgr/.github/workflows/full-security-scan.yml@main
+    secrets: inherit
+```
 
+**With custom product name:**
+```yaml
+name: Security
+on: [push]
+jobs:
+  scan:
+    uses: learningtapestry/infosec-mgr/.github/workflows/semgrep.yml@main
+    with:
+      product_name: "My Custom Product Name"
+    secrets: inherit
+```
 
-## Community, Getting Involved, and Updates
+## Organization Setup (One-Time)
 
-[<img src="https://raw.githubusercontent.com/DefectDojo/django-DefectDojo/dev/docs/assets/images/slack-logo-icon.png" alt="Slack" height="50"/>](https://owasp.org/slack/invite)
-[<img src="https://raw.githubusercontent.com/DefectDojo/django-DefectDojo/dev/docs/assets/images/Linkedin-logo-icon-png.png" alt="LinkedIn" height="50"/>](https://www.linkedin.com/company/defectdojo)
-[<img src="https://raw.githubusercontent.com/DefectDojo/django-DefectDojo/dev/docs/assets/images/Twitter_Logo.png" alt="Twitter" height="50"/>](https://twitter.com/defectdojo)
-[<img src="https://raw.githubusercontent.com/DefectDojo/django-DefectDojo/dev/docs/assets/images/YouTube-Emblem.png" alt="Youtube" height="50"/>](https://www.youtube.com/channel/UCWw9qzqptiIvTqSqhOFuCuQ)
+Set these secrets at the org level (Settings → Secrets → Actions):
 
-[Join the OWASP Slack Community](https://owasp.org/slack/invite) and participate in the discussion! You can find us in
-our channel there, [#defectdojo](https://owasp.slack.com/channels/defectdojo). Follow DefectDojo on
-[Twitter](https://twitter.com/defectdojo), [LinkedIn](https://www.linkedin.com/company/defectdojo), and
-[YouTube](https://www.youtube.com/channel/UCWw9qzqptiIvTqSqhOFuCuQ) for project updates!
+| Secret | Value |
+|--------|-------|
+| `DEFECTDOJO_URL` | URL of your DefectDojo instance |
+| `DEFECTDOJO_TOKEN` | API token from DefectDojo |
 
-## Contributing
+## Project Structure
 
-Please see our [contributing guidelines](readme-docs/CONTRIBUTING.md) for details and standards on contributing __before__ considering or submitting a pull request.
+```
+infosec-mgr/
+├── .github/
+│   └── workflows/
+│       ├── semgrep.yml              # Reusable: SAST scanning
+│       ├── trivy.yml                # Reusable: Container scanning
+│       ├── full-security-scan.yml   # Reusable: All scans
+│       └── self-scan.yml            # Dogfood: scan this repo
+│
+├── docker/
+│   └── extra_fixtures/              # DefectDojo products/config
+│       ├── extra_001_product_types.json
+│       └── extra_002_products.json
+│
+├── scripts/
+│   ├── setup-via-api.sh             # API setup helper
+│   └── import-scan.sh               # Manual import script
+│
+├── docker-compose.yml               # DefectDojo deployment
+├── CLAUDE.md                        # AI assistant instructions
+└── README.md                        # This file
+```
 
-## Pro Edition
+## DefectDojo Config-as-Code
 
-[Upgrade to DefectDojo Pro!](https://defectdojo.com/pricing) Pro transcends the do-it-yourself approach of open-source: A new UI, incredibile scalability, API connectors, ServiceNow, GitHub, GitLab, Azure DevOps, automatic data enrichment, prioritization, and more! See all the differentiators at the bottom of our pricing page: [defectdojo.com/pricing](https://defectdojo.com/pricing).
+All DefectDojo configuration is managed through files:
 
-Alternatively, for information please email hello@defectdojo.com
+| Configuration | Location |
+|---------------|----------|
+| Product Types | `docker/extra_fixtures/extra_001_product_types.json` |
+| Products | `docker/extra_fixtures/extra_002_products.json` |
+| Settings | `docker-compose.override.yml` (DD_* env vars) |
 
-## About Us
+### Adding a New Product
 
-DefectDojo is maintained by:
-* Greg Anderson ([@devGregA](https://github.com/devgrega) | [LinkedIn](https://www.linkedin.com/in/g-anderson/))
-* Matt Tesauro ([@mtesauro](https://github.com/mtesauro) | [LinkedIn](https://www.linkedin.com/in/matttesauro/) |
-  [@matt_tesauro](https://twitter.com/matt_tesauro))
+1. Edit `docker/extra_fixtures/extra_002_products.json`
+2. Rebuild: `docker compose build uwsgi && docker compose up -d`
+3. Load: `docker compose exec uwsgi python manage.py loaddata extra_002_products`
 
-Core Moderators can help you with pull requests or feedback on dev ideas:
-* Cody Maffucci ([@Maffooch](https://github.com/maffooch) | [LinkedIn](https://www.linkedin.com/in/cody-maffucci))
+## Commands Reference
 
-Moderators can help you with pull requests or feedback on dev ideas:
-* Charles Neill ([@cneill](https://github.com/cneill) | [@ccneill](https://twitter.com/ccneill))
-* Blake Owens ([@blakeaowens](https://github.com/blakeaowens))
+```bash
+# DefectDojo
+docker compose up -d                    # Start
+docker compose down                     # Stop
+docker compose logs -f uwsgi            # View logs
 
-## Hall of Fame
-* Jannik Jürgens ([@alles-klar](https://github.com/alles-klar)) - Jannik was a long time contributor and moderator for
-  DefectDojo and made significant contributions to many areas of the platform. Jannik was instrumental in pioneering
-  and optimizing deployment methods.
-* Valentijn Scholten ([@valentijnscholten](https://github.com/valentijnscholten) |
-  [Sponsor](https://github.com/sponsors/valentijnscholten) |
-  [LinkedIn](https://www.linkedin.com/in/valentijn-scholten/)) - Valentijn served as a core moderator for 3 years.
-  Valentijn's contributions were numerous and extensive. He overhauled, improved, and optimized many parts of the
-  codebase. He consistently fielded questions, provided feedback on pull requests, and provided a helping hand wherever
-  it was needed.
-* Fred Blaise ([@madchap](https://github.com/madchap) | [LinkedIn](https://www.linkedin.com/in/fredblaise/)) - Fred
-  served as a core moderator during a critical time for DefectDojo. He contributed code, helped the team stay organized,
-  and architected important policies and procedures.
-* Aaron Weaver ([@aaronweaver](https://github.com/aaronweaver) | [LinkedIn](https://www.linkedin.com/in/aweaver/)) -
-  Aaron has been a long time contributor and user of DefectDojo. He did the second major UI overhaul and his
-  contributions include automation enhancements, CI/CD engagements, increased metadata at the product level, and many
-  more.
+# After fixture changes
+docker compose build uwsgi && docker compose up -d
+docker compose exec uwsgi python manage.py loaddata extra_002_products
+```
 
-## Security
+## Production Deployment
 
-Please report Security issues via our [disclosure policy](readme-docs/SECURITY.md).
+For production:
+1. Change `DD_SECRET_KEY` and `DD_CREDENTIAL_AES_256_KEY`
+2. Use external PostgreSQL (RDS, CloudSQL)
+3. Enable HTTPS
+4. Set `DD_ALLOWED_HOSTS` properly
 
 ## License
 
-DefectDojo is licensed under the [BSD 3-Clause License](LICENSE.md)
+Based on [DefectDojo](https://github.com/DefectDojo/django-DefectDojo), licensed under BSD-3-Clause.
