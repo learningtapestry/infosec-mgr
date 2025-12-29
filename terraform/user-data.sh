@@ -1,6 +1,7 @@
 #!/bin/bash
 # DefectDojo EC2 Bootstrap Script
 # This script runs on first boot to set up the DefectDojo environment
+# Note: $${var} syntax is used to escape bash variables from Terraform interpolation
 
 set -e
 
@@ -220,12 +221,17 @@ echo "0 3 * * * root $APP_DIR/backup.sh >> /var/log/defectdojo-backup.log 2>&1" 
 
 # Save important info
 echo "Saving deployment info..."
+DOMAIN_DISPLAY="None (use Elastic IP)"
+if [ -n "$DOMAIN_NAME" ]; then
+  DOMAIN_DISPLAY="$DOMAIN_NAME"
+fi
+
 cat > $APP_DIR/deployment-info.txt << EOF
 DefectDojo Deployment Information
 =================================
 Deployed: $(date)
 Repository: $GITHUB_REPO
-Domain: ${DOMAIN_NAME:-"None (use Elastic IP)"}
+Domain: $DOMAIN_DISPLAY
 S3 Bucket: $S3_BUCKET
 
 Secrets (stored in docker-compose.override.yml):
@@ -248,4 +254,8 @@ EOF
 chmod 600 $APP_DIR/deployment-info.txt
 
 echo "DefectDojo bootstrap completed at $(date)"
-echo "Access DefectDojo at: ${DOMAIN_NAME:+https://$DOMAIN_NAME}${DOMAIN_NAME:-http://<elastic-ip>:8080}"
+if [ -n "$DOMAIN_NAME" ]; then
+  echo "Access DefectDojo at: https://$DOMAIN_NAME"
+else
+  echo "Access DefectDojo at: http://<elastic-ip>:8080"
+fi
