@@ -1,0 +1,87 @@
+name: Deploy Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action to run'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+      domain_name:
+        description: 'Domain name for SSL (optional)'
+        required: false
+        type: string
+        default: 'infosec-scanning.learningtapestry.com'
+
+env:
+  TF_VAR_domain_name: ${{ inputs.domain_name }}
+  TF_VAR_existing_eip_allocation_id: ${{ secrets.EIP_ALLOCATION_ID }}
+  TF_VAR_create_key_pair: "false"
+  AWS_REGION: us-east-1
+
+jobs:
+  terraform:
+    name: Terraform ${{ inputs.action }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.6"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Format Check
+        run: terraform fmt -check
+        continue-on-error: true
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -out=tfplan -no-color
+        continue-on-error: true
+
+      - name: Show Plan Summary
+        run: |
+          echo "## Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          terraform show -no-color tfplan >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Terraform Apply
+        if: inputs.action == 'apply' && steps.plan.outcome == 'success'
+        run: terraform apply -auto-approve tfplan
+
+      - name: Get Outputs
+        if: inputs.action == 'apply'
+        run: |
+          echo "## Deployment Outputs" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          terraform output >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          # Save outputs for potential use by other workflows
+          echo "ELASTIC_IP=$(terraform output -raw elastic_ip)" >> $GITHUB_OUTPUT
+          echo "DEFECTDOJO_URL=$(terraform output -raw defectdojo_url)" >> $GITHUB_OUTPUT
+          echo "EIP_ALLOCATION_ID=$(terraform output -raw eip_allocation_id)" >> $GITHUB_OUTPUT

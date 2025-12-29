@@ -1,0 +1,24 @@
+# Example Terraform variables
+# Copy this file to terraform.tfvars and customize
+
+aws_region         = "us-east-1"
+environment        = "production"
+instance_type      = "t3.medium"
+volume_size        = 30
+key_name           = "infosec-key"
+
+# IMPORTANT: Use existing Elastic IP to preserve the IP address across deploys
+# Get allocation ID with: aws ec2 describe-addresses --query 'Addresses[?PublicIp==`YOUR_IP`].AllocationId'
+# existing_eip_allocation_id = "eipalloc-06f24e146d6c650af"
+
+# Set to false since the SSH key already exists in AWS
+create_key_pair = false
+
+# Optional: Set domain for SSL (requires DNS to be configured first)
+# domain_name = "infosec-scanning.learningtapestry.com"
+
+# Optional: Restrict SSH access to specific IPs
+# allowed_ssh_cidrs = ["1.2.3.4/32", "5.6.7.8/32"]
+
+# Optional: Set admin password (otherwise auto-generated)
+# defectdojo_admin_password = "your-secure-password"

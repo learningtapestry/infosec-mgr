@@ -1,0 +1,156 @@
+{
+  "version": "1.0.0",
+  "results": [
+    {
+      "check_id": "javascript.express.security.audit.xss.mustache.var-in-script-tag",
+      "path": "src/views/dashboard.js",
+      "start": {
+        "line": 42,
+        "col": 5
+      },
+      "end": {
+        "line": 42,
+        "col": 45
+      },
+      "extra": {
+        "message": "Detected a template variable used in a script tag. This could allow an attacker to inject JavaScript code into the page, resulting in XSS.",
+        "severity": "WARNING",
+        "metadata": {
+          "category": "security",
+          "confidence": "LOW",
+          "cwe": ["CWE-79: Improper Neutralization of Input During Web Page Generation"],
+          "impact": "MEDIUM",
+          "likelihood": "LOW",
+          "owasp": ["A07:2017 - Cross-Site Scripting (XSS)"],
+          "references": [
+            "https://owasp.org/www-community/attacks/xss/"
+          ],
+          "subcategory": ["audit"],
+          "technology": ["express"]
+        },
+        "lines": "    const script = `<script>var data = ${userData}</script>`;"
+      }
+    },
+    {
+      "check_id": "python.django.security.injection.sql.sql-injection-using-raw",
+      "path": "app/models/user.py",
+      "start": {
+        "line": 78,
+        "col": 1
+      },
+      "end": {
+        "line": 78,
+        "col": 67
+      },
+      "extra": {
+        "message": "Detected SQL statement that is tainted by user input. This could lead to SQL injection if the variable is user-controlled.",
+        "severity": "ERROR",
+        "metadata": {
+          "category": "security",
+          "confidence": "MEDIUM",
+          "cwe": ["CWE-89: Improper Neutralization of Special Elements used in an SQL Command"],
+          "impact": "HIGH",
+          "likelihood": "MEDIUM",
+          "owasp": ["A03:2021 - Injection"],
+          "references": [
+            "https://owasp.org/Top10/A03_2021-Injection/"
+          ],
+          "subcategory": ["vuln"],
+          "technology": ["django"]
+        },
+        "lines": "User.objects.raw(f\"SELECT * FROM users WHERE id = {user_id}\")"
+      }
+    },
+    {
+      "check_id": "generic.secrets.security.detected-aws-access-key-id",
+      "path": "config/settings.py",
+      "start": {
+        "line": 15,
+        "col": 1
+      },
+      "end": {
+        "line": 15,
+        "col": 45
+      },
+      "extra": {
+        "message": "AWS Access Key ID detected. This is a credential and should not be hardcoded.",
+        "severity": "ERROR",
+        "metadata": {
+          "category": "security",
+          "confidence": "HIGH",
+          "cwe": ["CWE-798: Use of Hard-coded Credentials"],
+          "impact": "HIGH",
+          "likelihood": "HIGH",
+          "owasp": ["A07:2021 - Identification and Authentication Failures"],
+          "references": [
+            "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"
+          ],
+          "subcategory": ["vuln"],
+          "technology": ["secrets"]
+        },
+        "lines": "AWS_ACCESS_KEY_ID = 'AKIAIOSFODNN7EXAMPLE'"
+      }
+    },
+    {
+      "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal",
+      "path": "src/utils/files.js",
+      "start": {
+        "line": 23,
+        "col": 10
+      },
+      "end": {
+        "line": 23,
+        "col": 55
+      },
+      "extra": {
+        "message": "Detected possible path traversal vulnerability. User input should be validated before being used in file path operations.",
+        "severity": "WARNING",
+        "metadata": {
+          "category": "security",
+          "confidence": "LOW",
+          "cwe": ["CWE-22: Improper Limitation of a Pathname to a Restricted Directory"],
+          "impact": "MEDIUM",
+          "likelihood": "LOW",
+          "owasp": ["A01:2021 - Broken Access Control"],
+          "references": [
+            "https://owasp.org/www-community/attacks/Path_Traversal"
+          ],
+          "subcategory": ["audit"],
+          "technology": ["javascript"]
+        },
+        "lines": "const filePath = path.join(baseDir, userInput);"
+      }
+    },
+    {
+      "check_id": "python.lang.security.deserialization.avoid-pickle",
+      "path": "app/cache/session.py",
+      "start": {
+        "line": 45,
+        "col": 5
+      },
+      "end": {
+        "line": 45,
+        "col": 32
+      },
+      "extra": {
+        "message": "Avoid using pickle for deserialization. pickle can lead to arbitrary code execution when deserializing untrusted data.",
+        "severity": "WARNING",
+        "metadata": {
+          "category": "security",
+          "confidence": "HIGH",
+          "cwe": ["CWE-502: Deserialization of Untrusted Data"],
+          "impact": "HIGH",
+          "likelihood": "LOW",
+          "owasp": ["A08:2021 - Software and Data Integrity Failures"],
+          "references": [
+            "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/"
+          ],
+          "subcategory": ["vuln"],
+          "technology": ["python"]
+        },
+        "lines": "data = pickle.loads(session_data)"
+      }
+    }
+  ],
+  "errors": []
+}

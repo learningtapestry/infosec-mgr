@@ -1,0 +1,78 @@
+name: Destroy Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "destroy" to confirm infrastructure destruction'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  validate:
+    name: Validate Confirmation
+    runs-on: ubuntu-latest
+    outputs:
+      confirmed: ${{ steps.check.outputs.confirmed }}
+    steps:
+      - name: Check confirmation
+        id: check
+        run: |
+          if [ "${{ inputs.confirm }}" = "destroy" ]; then
+            echo "confirmed=true" >> $GITHUB_OUTPUT
+            echo "Destruction confirmed"
+          else
+            echo "confirmed=false" >> $GITHUB_OUTPUT
+            echo "::error::You must type 'destroy' to confirm. Got: '${{ inputs.confirm }}'"
+            exit 1
+          fi
+
+  destroy:
+    name: Terraform Destroy
+    needs: validate
+    if: needs.validate.outputs.confirmed == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.6"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan Destroy
+        run: terraform plan -destroy -out=tfplan-destroy -no-color
+
+      - name: Show Destroy Plan
+        run: |
+          echo "## Resources to be Destroyed" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          terraform show -no-color tfplan-destroy >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Terraform Destroy
+        run: terraform apply -auto-approve tfplan-destroy
+
+      - name: Confirm Destruction
+        run: |
+          echo "## Infrastructure Destroyed" >> $GITHUB_STEP_SUMMARY
+          echo "All resources have been destroyed at $(date)" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,119 @@
+name: Deploy Application
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'terraform/**'
+      - 'tests/**'
+      - '*.md'
+      - '.github/workflows/deploy-infra.yml'
+      - '.github/workflows/destroy-infra.yml'
+  workflow_dispatch:
+
+env:
+  EC2_USER: ec2-user
+  APP_DIR: /opt/defectdojo/repo
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    if: github.repository == 'learningtapestry/infosec-mgr'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/infosec-key.pem
+          chmod 600 ~/.ssh/infosec-key.pem
+
+      - name: Get EC2 IP from Terraform state
+        id: ec2
+        run: |
+          # Use the stored elastic IP from secrets
+          # This avoids needing Terraform state access for deploys
+          echo "ip=${{ secrets.EC2_ELASTIC_IP }}" >> $GITHUB_OUTPUT
+
+      - name: Deploy to EC2
+        env:
+          EC2_IP: ${{ steps.ec2.outputs.ip }}
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/infosec-key.pem $EC2_USER@$EC2_IP << 'ENDSSH'
+            set -e
+            cd ${{ env.APP_DIR }}
+
+            echo "Pulling latest code..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "Pulling latest Docker images..."
+            docker compose pull
+
+            echo "Restarting services..."
+            docker compose up -d
+
+            echo "Waiting for services to be healthy..."
+            sleep 30
+
+            echo "Checking service health..."
+            docker compose ps
+
+            echo "Deployment complete!"
+          ENDSSH
+
+      - name: Health Check
+        env:
+          DEFECTDOJO_URL: ${{ secrets.DEFECTDOJO_URL }}
+        run: |
+          echo "Checking DefectDojo health..."
+          for i in {1..10}; do
+            if curl -sf "$DEFECTDOJO_URL/api/v2/" > /dev/null 2>&1; then
+              echo "DefectDojo is healthy!"
+              exit 0
+            fi
+            echo "Waiting for DefectDojo... ($i/10)"
+            sleep 10
+          done
+          echo "Health check failed!"
+          exit 1
+
+  smoke-test:
+    name: Smoke Tests
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: github.repository == 'learningtapestry/infosec-mgr'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: tests
+        run: npm ci
+        continue-on-error: true
+
+      - name: Run smoke tests
+        working-directory: tests
+        env:
+          BASE_URL: ${{ secrets.DEFECTDOJO_URL }}
+          DEFECTDOJO_TOKEN: ${{ secrets.DEFECTDOJO_TOKEN }}
+        run: npm run test:smoke
+        continue-on-error: true
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test-results
+          path: tests/test-results/
+          retention-days: 7
