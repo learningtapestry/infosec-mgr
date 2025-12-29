@@ -75,11 +75,13 @@ jobs:
         run: |
           echo "Checking DefectDojo health..."
           for i in {1..10}; do
-            if curl -sf "$DEFECTDOJO_URL/api/v2/" > /dev/null 2>&1; then
-              echo "DefectDojo is healthy!"
+            # Use -k for self-signed certs, accept 403 (auth required) as healthy
+            STATUS=$(curl -sk -o /dev/null -w "%{http_code}" "$DEFECTDOJO_URL/api/v2/" 2>/dev/null || echo "000")
+            if [[ "$STATUS" == "200" || "$STATUS" == "403" || "$STATUS" == "401" ]]; then
+              echo "DefectDojo is healthy! (HTTP $STATUS)"
               exit 0
             fi
-            echo "Waiting for DefectDojo... ($i/10)"
+            echo "Waiting for DefectDojo... ($i/10) [HTTP $STATUS]"
             sleep 10
           done
           echo "Health check failed!"
