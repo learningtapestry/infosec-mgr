@@ -46,8 +46,8 @@ echo "Cloning repository..."
 git clone $GITHUB_REPO $APP_DIR/repo
 cd $APP_DIR/repo
 
-# Fix git ownership for ec2-user deploys
-chown -R ec2-user:ec2-user $APP_DIR/repo/.git
+# Fix repo ownership for ec2-user deploys
+chown -R ec2-user:ec2-user $APP_DIR/repo
 
 # Generate secrets if not provided
 DD_SECRET_KEY=$(openssl rand -base64 32)
