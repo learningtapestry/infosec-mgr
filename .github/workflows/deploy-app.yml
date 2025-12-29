@@ -47,6 +47,9 @@ jobs:
             set -e
             cd ${{ env.APP_DIR }}
 
+            # Fix git safe directory issue (repo owned by root, running as ec2-user)
+            git config --global --add safe.directory ${{ env.APP_DIR }}
+
             echo "Pulling latest code..."
             git fetch origin main
             git reset --hard origin/main
