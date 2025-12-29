@@ -1,4 +1,4 @@
-# This docker-compose.yml file  is fully functional to evaluate DefectDojo
+# This docker-compose.yml file is fully functional to evaluate DefectDojo
 # in your local environment.
 #
 # Although Docker Compose is one of the supported installation methods to
