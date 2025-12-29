@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: ''
+      product_type_name:
+        description: 'Product type for auto-creation (default: Web Application)'
+        required: false
+        type: string
+        default: 'Web Application'
       scan_type:
         description: 'Trivy scan type: fs (filesystem), image, or repo'
         required: false
@@ -80,6 +85,7 @@ jobs:
               -H "Authorization: Token ${{ secrets.DEFECTDOJO_TOKEN }}" \
               -F "scan_type=Trivy Scan" \
               -F "product_name=${{ steps.product.outputs.name }}" \
+              -F "product_type_name=${{ inputs.product_type_name }}" \
               -F "engagement_name=CI/CD Scan" \
               -F "auto_create_context=true" \
               -F "verified=false" \
