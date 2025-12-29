@@ -28,12 +28,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run Semgrep
-        uses: returntocorp/semgrep-action@v2
-        with:
-          config: ${{ inputs.semgrep_config }}
-        env:
-          SEMGREP_RULES: ${{ inputs.semgrep_config }}
+      - name: Install Semgrep
+        run: pip install semgrep
 
       - name: Export Semgrep results
         run: |
