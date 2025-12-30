@@ -54,16 +54,20 @@ jobs:
         if: always()
         run: |
           if [ -f semgrep-results.json ]; then
-            curl -X POST "${{ secrets.DEFECTDOJO_URL }}/api/v2/import-scan/" \
+            # Use reimport-scan for deduplication - it handles both initial import
+            # and updates, automatically deduplicating findings within the test
+            curl -X POST "${{ secrets.DEFECTDOJO_URL }}/api/v2/reimport-scan/" \
               -H "Authorization: Token ${{ secrets.DEFECTDOJO_TOKEN }}" \
               -F "scan_type=Semgrep JSON Report" \
               -F "product_name=${{ steps.product.outputs.name }}" \
               -F "product_type_name=${{ inputs.product_type_name }}" \
               -F "engagement_name=CI/CD Scan" \
+              -F "test_title=Semgrep" \
               -F "auto_create_context=true" \
               -F "verified=false" \
               -F "active=true" \
               -F "file=@semgrep-results.json" \
+              -k \
               --fail-with-body || echo "Warning: Failed to upload to DefectDojo"
           else
             echo "No Semgrep results file found"
