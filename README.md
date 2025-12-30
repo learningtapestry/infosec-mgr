@@ -79,6 +79,13 @@ docker compose logs initializer | grep "Admin password"
 | `trivy.yml` | Container & dependency scanning | Find vulnerable packages |
 | `full-security-scan.yml` | All scans combined | Comprehensive security check |
 
+### Key Behaviors
+
+- **Non-blocking**: Scans run independently from your CI/CD pipeline - they won't fail your builds
+- **Deduplication**: Uses DefectDojo's reimport API - only NEW findings are reported, existing issues aren't duplicated
+- **Auto-creates context**: Products and engagements are created automatically if they don't exist
+- **Dogfooding**: This repo scans itself using these same workflows (see `.github/workflows/self-scan.yml`)
+
 ### Using in Your Repo
 
 **Minimal (just Semgrep):**
