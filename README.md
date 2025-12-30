@@ -21,7 +21,7 @@ Central security scanning infrastructure for Learning Tapestry. Provides vulnera
 
 1. Go to https://infosec-scanning.learningtapestry.com
 2. Username: `admin`
-3. Password: Contact the security team or check `/tmp/dd-admin-creds.txt` on your machine if you recently deployed
+3. Password: In Bitwarden 
 
 ### Getting an API Token
 
