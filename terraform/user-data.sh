@@ -180,6 +180,7 @@ EOF
     docker compose up -d
 
     # Setup certificate renewal cron
+    mkdir -p /etc/cron.d
     echo "0 0,12 * * * root certbot renew --quiet && cp /etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem $APP_DIR/ssl/nginx.crt && cp /etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem $APP_DIR/ssl/nginx.key && docker compose -f $APP_DIR/repo/docker-compose.yml restart nginx" > /etc/cron.d/certbot-renew
   else
     echo "SSL certificate acquisition failed, starting without SSL"
@@ -220,6 +221,7 @@ sed -i "s/S3_BUCKET_PLACEHOLDER/$S3_BUCKET/g" $APP_DIR/backup.sh
 chmod +x $APP_DIR/backup.sh
 
 # Setup daily backup cron (3 AM)
+mkdir -p /etc/cron.d
 echo "0 3 * * * root $APP_DIR/backup.sh >> /var/log/defectdojo-backup.log 2>&1" > /etc/cron.d/defectdojo-backup
 
 # Save important info
