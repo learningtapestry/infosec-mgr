@@ -249,7 +249,7 @@ with:
 ```yaml
 with:
   product_name: 'optional-custom-name'
-  product_type_name: 'Cloud Infrastructure' # DefectDojo product type
+  product_type_name: 'Web Application'      # Must match existing product type
   aws_region: 'us-east-1'                   # AWS region to scan
 secrets:
   SCOUTSUITE_AWS_ACCESS_KEY_ID: ${{ secrets.SCOUTSUITE_AWS_ACCESS_KEY_ID }}

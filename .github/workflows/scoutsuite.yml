@@ -9,10 +9,10 @@ on:
         type: string
         default: ''
       product_type_name:
-        description: 'Product type for auto-creation (default: Cloud Infrastructure)'
+        description: 'Product type for auto-creation. Must match existing product type if product already exists.'
         required: false
         type: string
-        default: 'Cloud Infrastructure'
+        default: 'Web Application'
       aws_region:
         description: 'AWS region for scanning (default: us-east-1)'
         required: false
