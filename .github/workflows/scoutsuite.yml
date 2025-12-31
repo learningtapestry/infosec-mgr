@@ -1,0 +1,108 @@
+name: ScoutSuite Cloud Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      product_name:
+        description: 'Product name in DefectDojo (defaults to repository name)'
+        required: false
+        type: string
+        default: ''
+      product_type_name:
+        description: 'Product type for auto-creation (default: Cloud Infrastructure)'
+        required: false
+        type: string
+        default: 'Cloud Infrastructure'
+      aws_region:
+        description: 'AWS region for scanning (default: us-east-1)'
+        required: false
+        type: string
+        default: 'us-east-1'
+    secrets:
+      DEFECTDOJO_URL:
+        required: true
+      DEFECTDOJO_TOKEN:
+        required: true
+      SCOUTSUITE_AWS_ACCESS_KEY_ID:
+        description: 'AWS access key for ScoutSuite (read-only IAM user)'
+        required: true
+      SCOUTSUITE_AWS_SECRET_ACCESS_KEY:
+        description: 'AWS secret key for ScoutSuite (read-only IAM user)'
+        required: true
+
+jobs:
+  scoutsuite:
+    name: ScoutSuite AWS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.SCOUTSUITE_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.SCOUTSUITE_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ScoutSuite
+        run: pip install scoutsuite
+
+      - name: Run ScoutSuite AWS scan
+        run: |
+          scout aws --no-browser --report-dir scoutsuite-results || true
+        continue-on-error: true
+
+      - name: Find ScoutSuite results
+        id: results
+        run: |
+          # ScoutSuite creates scoutsuite_results_aws-*.js (JavaScript format) in the report dir
+          RESULTS_FILE=$(find scoutsuite-results -name 'scoutsuite_results_aws-*.js' -type f 2>/dev/null | head -1)
+          if [ -n "$RESULTS_FILE" ]; then
+            echo "file=$RESULTS_FILE" >> $GITHUB_OUTPUT
+            echo "Found results file: $RESULTS_FILE"
+          else
+            echo "No ScoutSuite results file found"
+            echo "file=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine product name
+        id: product
+        run: |
+          if [ -n "${{ inputs.product_name }}" ]; then
+            echo "name=${{ inputs.product_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${{ github.repository }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload to DefectDojo
+        if: steps.results.outputs.file != ''
+        run: |
+          curl -X POST "${{ secrets.DEFECTDOJO_URL }}/api/v2/reimport-scan/" \
+            -H "Authorization: Token ${{ secrets.DEFECTDOJO_TOKEN }}" \
+            -F "scan_type=Scout Suite Scan" \
+            -F "product_name=${{ steps.product.outputs.name }}" \
+            -F "product_type_name=${{ inputs.product_type_name }}" \
+            -F "engagement_name=CI/CD Scan" \
+            -F "test_title=ScoutSuite AWS" \
+            -F "auto_create_context=true" \
+            -F "verified=false" \
+            -F "active=true" \
+            -F "file=@${{ steps.results.outputs.file }}" \
+            -k \
+            --fail-with-body || echo "Warning: Failed to upload to DefectDojo"
+
+      - name: Upload results artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scoutsuite-results
+          path: scoutsuite-results/
+          retention-days: 30
+          if-no-files-found: ignore

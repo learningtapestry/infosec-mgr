@@ -58,7 +58,8 @@ Other repos call these with `uses: learningtapestry/infosec-mgr/.github/workflow
 |----------|---------|
 | `semgrep.yml` | SAST scanning, uploads to DefectDojo |
 | `trivy.yml` | Dependency/container scanning |
-| `full-security-scan.yml` | Both scans combined |
+| `scoutsuite.yml` | AWS cloud security scanning |
+| `full-security-scan.yml` | All scans combined |
 
 **Changes to these workflows affect ALL repos using them.** Test thoroughly.
 

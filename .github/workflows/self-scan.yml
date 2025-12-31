@@ -31,3 +31,14 @@ jobs:
     secrets:
       DEFECTDOJO_URL: ${{ secrets.DEFECTDOJO_URL }}
       DEFECTDOJO_TOKEN: ${{ secrets.DEFECTDOJO_TOKEN }}
+
+  scoutsuite:
+    name: ScoutSuite AWS
+    uses: ./.github/workflows/scoutsuite.yml
+    with:
+      product_name: 'learningtapestry/infosec-mgr'
+    secrets:
+      DEFECTDOJO_URL: ${{ secrets.DEFECTDOJO_URL }}
+      DEFECTDOJO_TOKEN: ${{ secrets.DEFECTDOJO_TOKEN }}
+      SCOUTSUITE_AWS_ACCESS_KEY_ID: ${{ secrets.SCOUTSUITE_AWS_ACCESS_KEY_ID }}
+      SCOUTSUITE_AWS_SECRET_ACCESS_KEY: ${{ secrets.SCOUTSUITE_AWS_SECRET_ACCESS_KEY }}

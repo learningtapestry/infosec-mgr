@@ -78,6 +78,44 @@ Semgrep automatically detects your language and applies relevant rules:
 | **Auto-creates product** | Your repo is automatically added to DefectDojo if it doesn't exist |
 | **PR scanning** | Scans run on PRs so you can see issues before merging |
 
+### Adding ScoutSuite (AWS Cloud Security)
+
+To scan your AWS infrastructure for security misconfigurations:
+
+```yaml
+# .github/workflows/security.yml
+name: Security Scan
+
+on:
+  push:
+    branches: [main, master]
+  schedule:
+    # Weekly scan recommended for cloud infrastructure
+    - cron: '0 9 * * 1'
+
+jobs:
+  scoutsuite:
+    name: AWS Cloud Security
+    uses: learningtapestry/infosec-mgr/.github/workflows/scoutsuite.yml@main
+    secrets:
+      DEFECTDOJO_URL: ${{ secrets.DEFECTDOJO_URL }}
+      DEFECTDOJO_TOKEN: ${{ secrets.DEFECTDOJO_TOKEN }}
+      SCOUTSUITE_AWS_ACCESS_KEY_ID: ${{ secrets.SCOUTSUITE_AWS_ACCESS_KEY_ID }}
+      SCOUTSUITE_AWS_SECRET_ACCESS_KEY: ${{ secrets.SCOUTSUITE_AWS_SECRET_ACCESS_KEY }}
+```
+
+**Required Setup:**
+1. Create a dedicated IAM user with `SecurityAudit` and `ViewOnlyAccess` policies (do NOT reuse Terraform/deployment credentials)
+2. Add `SCOUTSUITE_AWS_ACCESS_KEY_ID` and `SCOUTSUITE_AWS_SECRET_ACCESS_KEY` as **repository-level** secrets
+
+ScoutSuite checks for:
+- Overly permissive IAM policies
+- Public S3 buckets
+- Unencrypted resources (EBS, RDS, S3)
+- Security group misconfigurations
+- CloudTrail/logging gaps
+- And 100+ other AWS security best practices
+
 ### Adding Trivy (Dependency Scanning)
 
 To also scan for vulnerable dependencies:
@@ -186,6 +224,7 @@ jobs:
 |----------|---------|-------------|
 | `semgrep.yml` | Static code analysis (SAST) | Every repo - finds code vulnerabilities |
 | `trivy.yml` | Dependency & container scanning | Repos with dependencies or containers |
+| `scoutsuite.yml` | AWS cloud security scanning | Repos that deploy AWS infrastructure |
 | `full-security-scan.yml` | All scans combined | Comprehensive security check |
 
 ### Workflow Parameters
@@ -204,6 +243,17 @@ with:
   product_name: 'optional-custom-name'
   scan_type: 'fs'                           # 'fs' (filesystem), 'image', or 'repo'
   image_ref: 'myimage:tag'                  # Required if scan_type is 'image'
+```
+
+**scoutsuite.yml:**
+```yaml
+with:
+  product_name: 'optional-custom-name'
+  product_type_name: 'Cloud Infrastructure' # DefectDojo product type
+  aws_region: 'us-east-1'                   # AWS region to scan
+secrets:
+  SCOUTSUITE_AWS_ACCESS_KEY_ID: ${{ secrets.SCOUTSUITE_AWS_ACCESS_KEY_ID }}
+  SCOUTSUITE_AWS_SECRET_ACCESS_KEY: ${{ secrets.SCOUTSUITE_AWS_SECRET_ACCESS_KEY }}
 ```
 
 ---
@@ -324,7 +374,9 @@ cd /opt/defectdojo/repo && git pull && docker compose pull && docker compose up 
 | `DEFECTDOJO_URL` | https://infosec-scanning.learningtapestry.com |
 | `DEFECTDOJO_TOKEN` | API token for scan uploads |
 
-**Repository Level:**
+> **Initial Setup:** After deploying DefectDojo, you must copy the API token and URL to GitHub organization secrets. Get the token from DefectDojo: click your username (top right) → API v2 Key, or visit `/api/key-v2`. Then add both `DEFECTDOJO_URL` and `DEFECTDOJO_TOKEN` as organization-level secrets in GitHub (Settings → Secrets and variables → Actions → Organization secrets).
+
+**Repository Level (for this repo's deployments):**
 | Secret | Purpose |
 |--------|---------|
 | `AWS_ACCESS_KEY_ID` | Terraform deployments |
@@ -332,6 +384,16 @@ cd /opt/defectdojo/repo && git pull && docker compose pull && docker compose up 
 | `EC2_SSH_PRIVATE_KEY` | App deployments |
 | `EC2_ELASTIC_IP` | App deployment target |
 | `EIP_ALLOCATION_ID` | Terraform EIP management |
+| `SCOUTSUITE_AWS_ACCESS_KEY_ID` | ScoutSuite cloud scanning (read-only) |
+| `SCOUTSUITE_AWS_SECRET_ACCESS_KEY` | ScoutSuite cloud scanning (read-only) |
+
+**Repository Level (for repos using ScoutSuite workflow):**
+| Secret | Purpose |
+|--------|---------|
+| `SCOUTSUITE_AWS_ACCESS_KEY_ID` | Dedicated read-only IAM user for ScoutSuite |
+| `SCOUTSUITE_AWS_SECRET_ACCESS_KEY` | Dedicated read-only IAM user for ScoutSuite |
+
+> **Security Note:** Create a separate IAM user for ScoutSuite with only `SecurityAudit` and `ViewOnlyAccess` policies. Do NOT reuse Terraform or deployment credentials - ScoutSuite should have read-only access to audit your infrastructure without being able to modify it or access sensitive data.
 
 ### Cost
 
@@ -366,6 +428,7 @@ infosec-mgr/
 │   └── workflows/
 │       ├── semgrep.yml              # Reusable: SAST scanning
 │       ├── trivy.yml                # Reusable: dependency scanning
+│       ├── scoutsuite.yml           # Reusable: AWS cloud security scanning
 │       ├── full-security-scan.yml   # Reusable: all scans
 │       ├── self-scan.yml            # Dogfood: scan this repo
 │       ├── deploy-infra.yml         # Terraform deployment
