@@ -1,0 +1,201 @@
+{
+  "about": "Learning Tapestry minimal viable security ruleset. Disables overly expensive or outdated findings that are not appropriate for small projects. Based on ScoutSuite default ruleset.",
+  "rules": {
+    "cloudtrail-duplicated-global-services-logging.json": [
+      {
+        "enabled": false,
+        "level": "warning",
+        "comment": "CloudTrail is expensive for small projects - deferred by policy"
+      }
+    ],
+    "cloudtrail-no-cloudwatch-integration.json": [
+      {
+        "enabled": false,
+        "level": "warning",
+        "comment": "CloudTrail is expensive for small projects - deferred by policy"
+      }
+    ],
+    "cloudtrail-no-data-logging.json": [
+      {
+        "enabled": false,
+        "level": "warning",
+        "comment": "CloudTrail is expensive for small projects - deferred by policy"
+      }
+    ],
+    "cloudtrail-no-encryption-with-kms.json": [
+      {
+        "enabled": false,
+        "level": "danger",
+        "comment": "CloudTrail is expensive for small projects - deferred by policy"
+      }
+    ],
+    "cloudtrail-no-global-services-logging.json": [
+      {
+        "enabled": false,
+        "level": "warning",
+        "comment": "CloudTrail is expensive for small projects - deferred by policy"
+      }
+    ],
+    "cloudtrail-no-log-file-validation.json": [
+      {
+        "enabled": false,
+        "level": "warning",
+        "comment": "CloudTrail is expensive for small projects - deferred by policy"
+      }
+    ],
+    "cloudtrail-no-logging.json": [
+      {
+        "enabled": false,
+        "level": "danger",
+        "comment": "CloudTrail is expensive for small projects - deferred by policy"
+      }
+    ],
+    "cloudtrail-not-configured.json": [
+      {
+        "enabled": false,
+        "level": "danger",
+        "comment": "CloudTrail is expensive for small projects - deferred by policy"
+      }
+    ],
+    "cloudtrail-partial-data-logging.json": [
+      {
+        "enabled": false,
+        "level": "warning",
+        "comment": "CloudTrail is expensive for small projects - deferred by policy"
+      }
+    ],
+    "iam-password-policy-expiration-threshold.json": [
+      {
+        "args": ["90"],
+        "enabled": false,
+        "level": "danger",
+        "comment": "Password expiration is outdated - NIST 800-63B and Microsoft no longer recommend this"
+      }
+    ],
+    "iam-password-policy-no-expiration.json": [
+      {
+        "enabled": false,
+        "level": "danger",
+        "comment": "Password expiration is outdated - NIST 800-63B and Microsoft no longer recommend this"
+      }
+    ],
+    "vpc-subnet-with-default-acls.json": [
+      {
+        "enabled": false,
+        "level": "warning",
+        "comment": "Default NACLs are fine for small projects - security groups provide sufficient control"
+      }
+    ],
+    "vpc-subnet-without-flow-log.json": [
+      {
+        "enabled": false,
+        "level": "warning",
+        "comment": "VPC Flow Logs are expensive for small projects - deferred by policy"
+      }
+    ],
+    "config-recorder-not-configured.json": [
+      {
+        "enabled": false,
+        "level": "warning",
+        "comment": "AWS Config is expensive for small projects - deferred by policy"
+      }
+    ],
+    "ec2-security-group-opens-all-ports-to-all.json": [
+      {
+        "enabled": true,
+        "level": "danger"
+      }
+    ],
+    "ec2-security-group-opens-ssh-port-to-all.json": [
+      {
+        "enabled": true,
+        "level": "danger"
+      }
+    ],
+    "ec2-security-group-opens-rdp-port-to-all.json": [
+      {
+        "enabled": true,
+        "level": "danger"
+      }
+    ],
+    "iam-password-policy-minimum-length.json": [
+      {
+        "args": ["14"],
+        "enabled": true,
+        "level": "danger"
+      }
+    ],
+    "iam-password-policy-reuse-enabled.json": [
+      {
+        "enabled": true,
+        "level": "danger"
+      }
+    ],
+    "iam-assume-role-lacks-external-id-and-mfa.json": [
+      {
+        "enabled": true,
+        "level": "danger"
+      }
+    ],
+    "iam-inline-policy-allows-sts-assume.json": [
+      {
+        "enabled": true,
+        "level": "danger"
+      }
+    ],
+    "iam-managed-policy-allows-full-privileges.json": [
+      {
+        "enabled": true,
+        "level": "danger"
+      }
+    ],
+    "iam-root-account-no-mfa.json": [
+      {
+        "enabled": true,
+        "level": "danger"
+      }
+    ],
+    "iam-root-account-no-hardware-mfa.json": [
+      {
+        "enabled": true,
+        "level": "warning"
+      }
+    ],
+    "ec2-ebs-volume-not-encrypted.json": [
+      {
+        "enabled": true,
+        "level": "warning"
+      }
+    ],
+    "ec2-default-security-group-in-use.json": [
+      {
+        "enabled": true,
+        "level": "warning"
+      }
+    ],
+    "ec2-default-security-group-with-rules.json": [
+      {
+        "enabled": true,
+        "level": "warning"
+      }
+    ],
+    "s3-bucket-no-logging.json": [
+      {
+        "enabled": true,
+        "level": "warning"
+      }
+    ],
+    "s3-bucket-no-mfa-delete.json": [
+      {
+        "enabled": true,
+        "level": "warning"
+      }
+    ],
+    "s3-bucket-allows-cleartext-requests.json": [
+      {
+        "enabled": true,
+        "level": "warning"
+      }
+    ]
+  }
+}

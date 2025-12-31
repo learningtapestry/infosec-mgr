@@ -18,6 +18,11 @@ on:
         required: false
         type: string
         default: 'us-east-1'
+      ruleset_path:
+        description: 'Path to custom ScoutSuite ruleset JSON file (relative to repo root). If not specified, uses .scoutsuite/lt-ruleset.json if present, otherwise default ScoutSuite rules.'
+        required: false
+        type: string
+        default: ''
     secrets:
       DEFECTDOJO_URL:
         required: true
@@ -54,9 +59,28 @@ jobs:
       - name: Install ScoutSuite
         run: pip install scoutsuite
 
+      - name: Determine ruleset
+        id: ruleset
+        run: |
+          # Check for custom ruleset in priority order
+          if [ -n "${{ inputs.ruleset_path }}" ] && [ -f "${{ inputs.ruleset_path }}" ]; then
+            echo "path=${{ inputs.ruleset_path }}" >> $GITHUB_OUTPUT
+            echo "Using custom ruleset: ${{ inputs.ruleset_path }}"
+          elif [ -f ".scoutsuite/lt-ruleset.json" ]; then
+            echo "path=.scoutsuite/lt-ruleset.json" >> $GITHUB_OUTPUT
+            echo "Using Learning Tapestry ruleset: .scoutsuite/lt-ruleset.json"
+          else
+            echo "path=" >> $GITHUB_OUTPUT
+            echo "Using default ScoutSuite ruleset"
+          fi
+
       - name: Run ScoutSuite AWS scan
         run: |
-          scout aws --no-browser --report-dir scoutsuite-results || true
+          if [ -n "${{ steps.ruleset.outputs.path }}" ]; then
+            scout aws --no-browser --report-dir scoutsuite-results --ruleset "${{ steps.ruleset.outputs.path }}" || true
+          else
+            scout aws --no-browser --report-dir scoutsuite-results || true
+          fi
         continue-on-error: true
 
       - name: Find ScoutSuite results

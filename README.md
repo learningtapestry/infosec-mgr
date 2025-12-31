@@ -216,6 +216,46 @@ jobs:
 3. Link to PR/commit if applicable
 4. Finding auto-closes when scanner no longer detects it
 
+### Triaging Initial Scan Results
+
+**Reality check:** Initial security scans are overwhelming. A first-time ScoutSuite scan of an AWS account might return 300+ findings. This is normal and doesn't mean your infrastructure is insecure - many findings are:
+
+- **Expensive for small projects** (CloudTrail, AWS Config, VPC Flow Logs)
+- **Outdated security practices** (password expiration - no longer recommended by NIST)
+- **AWS defaults that are fine** (default NACLs when using security groups)
+- **Noise that needs investigation** (default security groups with rules)
+
+**Triage Strategy:**
+
+| Category | Action | Example |
+|----------|--------|---------|
+| **Real security issues** | Fix immediately | SSH open to 0.0.0.0/0, no MFA |
+| **Outdated practices** | Mark as out-of-scope with note | Password expiration requirements |
+| **Cost-deferred** | Mark as out-of-scope, enable when budget allows | CloudTrail, Flow Logs |
+| **Needs investigation** | Research, then fix or document | Default security group rules |
+
+**Using Claude Code for Triage:**
+
+Claude Code (claude.ai/code) can significantly accelerate findings triage:
+
+```bash
+# Example: Have Claude analyze and categorize findings
+claude "Read the ScoutSuite findings from DefectDojo API and categorize them
+into: real security issues to fix, outdated practices to ignore,
+cost-deferred items, and items needing investigation.
+Create a policy document explaining each decision."
+```
+
+Claude Code can:
+- Query DefectDojo API to read all findings
+- Categorize findings based on your organization's risk tolerance
+- Update findings in bulk (add notes, mark as out-of-scope)
+- Create ScoutSuite rulesets to prevent future noise
+- Generate documentation explaining triage decisions
+- Fix actual security issues (update Terraform, IAM policies, etc.)
+
+See `INFOSEC-FINDINGS.md` for an example of AI-assisted triage output.
+
 ---
 
 ## Available Workflows
@@ -458,8 +498,12 @@ infosec-mgr/
 │
 ├── tests/                           # Playwright E2E tests
 │
+├── .scoutsuite/
+│   └── lt-ruleset.json              # LT custom ScoutSuite ruleset (excludes noise)
+│
 ├── docker-compose.yml               # DefectDojo deployment
 ├── CLAUDE.md                        # AI assistant instructions
+├── INFOSEC-FINDINGS.md              # Security findings triage report
 └── README.md                        # This file
 ```
 
