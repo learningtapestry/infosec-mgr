@@ -1,0 +1,114 @@
+name: Verify Backups
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  schedule:
+    # Run daily at 6 AM UTC (after 3 AM backup)
+    - cron: '0 6 * * *'
+
+jobs:
+  verify:
+    name: Verify Backup Health
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Check daily backup freshness
+        id: daily
+        run: |
+          BUCKET="infosec-mgr-backups-866795125297"
+
+          echo "Checking daily backups..."
+
+          # Get most recent daily backup
+          LATEST=$(aws s3 ls "s3://$BUCKET/backups/daily/" --recursive | sort | tail -1)
+
+          if [ -z "$LATEST" ]; then
+            echo "::error::No daily backups found!"
+            exit 1
+          fi
+
+          # Extract filename and size
+          BACKUP_DATE=$(echo "$LATEST" | awk '{print $1}')
+          BACKUP_TIME=$(echo "$LATEST" | awk '{print $2}')
+          BACKUP_SIZE=$(echo "$LATEST" | awk '{print $3}')
+          BACKUP_FILE=$(echo "$LATEST" | awk '{print $4}')
+
+          echo "Latest backup: $BACKUP_FILE"
+          echo "Date: $BACKUP_DATE $BACKUP_TIME"
+          echo "Size: $BACKUP_SIZE bytes"
+
+          # Check if backup is recent (within last 25 hours)
+          BACKUP_EPOCH=$(date -d "$BACKUP_DATE $BACKUP_TIME" +%s 2>/dev/null || date -j -f "%Y-%m-%d %H:%M:%S" "$BACKUP_DATE $BACKUP_TIME" +%s)
+          NOW_EPOCH=$(date +%s)
+          AGE_HOURS=$(( (NOW_EPOCH - BACKUP_EPOCH) / 3600 ))
+
+          echo "Backup age: $AGE_HOURS hours"
+
+          if [ $AGE_HOURS -gt 25 ]; then
+            echo "::error::Most recent backup is $AGE_HOURS hours old (should be < 25 hours)"
+            exit 1
+          fi
+
+          # Check minimum size (100KB sanity check)
+          if [ "$BACKUP_SIZE" -lt 100000 ]; then
+            echo "::error::Backup size ($BACKUP_SIZE bytes) is suspiciously small"
+            exit 1
+          fi
+
+          echo "✅ Daily backup is healthy"
+          echo "backup_file=$BACKUP_FILE" >> $GITHUB_OUTPUT
+          echo "backup_size=$BACKUP_SIZE" >> $GITHUB_OUTPUT
+          echo "backup_age_hours=$AGE_HOURS" >> $GITHUB_OUTPUT
+
+      - name: Check monthly backup exists
+        run: |
+          BUCKET="infosec-mgr-backups-866795125297"
+          PREV_MONTH=$(date -d "1 month ago" +%Y-%m 2>/dev/null || date -v-1m +%Y-%m)
+
+          echo "Checking for monthly backup from $PREV_MONTH..."
+
+          # Monthly backups only created on 1st of month, so check if we're past the 1st
+          DAY=$(date +%d)
+          if [ "$DAY" -gt 1 ]; then
+            # Should have a backup from this month's 1st
+            CURRENT_MONTH=$(date +%Y-%m)
+            MONTHLY=$(aws s3 ls "s3://$BUCKET/backups/monthly/defectdojo-monthly-$CURRENT_MONTH" 2>/dev/null || true)
+
+            if [ -z "$MONTHLY" ]; then
+              # Check previous month as fallback (if we're early in month)
+              MONTHLY=$(aws s3 ls "s3://$BUCKET/backups/monthly/defectdojo-monthly-$PREV_MONTH" 2>/dev/null || true)
+            fi
+
+            if [ -z "$MONTHLY" ]; then
+              echo "::warning::No monthly backup found for $CURRENT_MONTH or $PREV_MONTH"
+              echo "This is expected if the new backup system was just deployed."
+            else
+              echo "✅ Monthly backup found: $MONTHLY"
+            fi
+          else
+            echo "ℹ️ It's the 1st of the month - monthly backup will be created with today's backup"
+          fi
+
+      - name: Summary
+        run: |
+          echo "## Backup Verification Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Daily backup exists | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backup is recent (< 25h) | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backup size > 100KB | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Latest backup:** ${{ steps.daily.outputs.backup_file }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Size:** ${{ steps.daily.outputs.backup_size }} bytes" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Age:** ${{ steps.daily.outputs.backup_age_hours }} hours" >> $GITHUB_STEP_SUMMARY

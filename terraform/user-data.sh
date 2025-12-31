@@ -14,6 +14,7 @@ GITHUB_REPO="${github_repo}"
 DOMAIN_NAME="${domain_name}"
 ADMIN_PASSWORD="${admin_password}"
 S3_BUCKET="${s3_bucket}"
+SNS_TOPIC_ARN="${sns_topic_arn}"
 
 # Create application directory
 APP_DIR="/opt/defectdojo"
@@ -190,31 +191,55 @@ else
   echo "No domain provided, skipping SSL setup"
 fi
 
-# Create backup script
+# Create backup script with tiered retention
+# Daily backups go to backups/daily/ (30-day S3 lifecycle)
+# Monthly backups go to backups/monthly/ (180-day S3 lifecycle)
 echo "Creating backup script..."
 cat > $APP_DIR/backup.sh << 'BACKUPEOF'
 #!/bin/bash
-# DefectDojo database backup script
+# DefectDojo database backup script with tiered retention
+#
+# Retention Policy:
+# - Daily backups: kept for 30 days (S3 lifecycle on backups/daily/)
+# - Monthly backups: kept for 6 months (S3 lifecycle on backups/monthly/)
+#
+# On the 1st of each month, the daily backup is also copied to monthly/
 
 set -e
 
 BACKUP_DIR="/opt/defectdojo/backups"
 S3_BUCKET="S3_BUCKET_PLACEHOLDER"
 DATE=$(date +%Y-%m-%d_%H-%M-%S)
+DAY_OF_MONTH=$(date +%d)
+YEAR_MONTH=$(date +%Y-%m)
 BACKUP_FILE="defectdojo-backup-$DATE.sql.gz"
 
-mkdir -p $BACKUP_DIR
+mkdir -p "$BACKUP_DIR"
 
-# Dump database
-docker compose -f /opt/defectdojo/repo/docker-compose.yml exec -T postgres pg_dump -U defectdojo defectdojo | gzip > $BACKUP_DIR/$BACKUP_FILE
+echo "[$(date)] Starting backup..."
 
-# Upload to S3
-aws s3 cp $BACKUP_DIR/$BACKUP_FILE s3://$S3_BUCKET/backups/$BACKUP_FILE
+# Dump database with compression
+docker compose -f /opt/defectdojo/repo/docker-compose.yml exec -T postgres \
+    pg_dump -U defectdojo defectdojo | gzip > "$BACKUP_DIR/$BACKUP_FILE"
 
-# Keep only last 7 local backups
-ls -t $BACKUP_DIR/defectdojo-backup-*.sql.gz | tail -n +8 | xargs -r rm
+BACKUP_SIZE=$(stat -c%s "$BACKUP_DIR/$BACKUP_FILE" 2>/dev/null || stat -f%z "$BACKUP_DIR/$BACKUP_FILE")
+echo "[$(date)] Local backup created: $BACKUP_FILE ($BACKUP_SIZE bytes)"
 
-echo "Backup completed: $BACKUP_FILE"
+# Upload to S3 daily prefix
+echo "[$(date)] Uploading to S3 daily prefix..."
+aws s3 cp "$BACKUP_DIR/$BACKUP_FILE" "s3://$S3_BUCKET/backups/daily/$BACKUP_FILE"
+
+# On the 1st of the month, also copy to monthly archive
+if [ "$DAY_OF_MONTH" = "01" ]; then
+    MONTHLY_FILE="defectdojo-monthly-$YEAR_MONTH.sql.gz"
+    echo "[$(date)] First of month - creating monthly archive: $MONTHLY_FILE"
+    aws s3 cp "$BACKUP_DIR/$BACKUP_FILE" "s3://$S3_BUCKET/backups/monthly/$MONTHLY_FILE"
+fi
+
+# Keep only last 7 local backups (local disk space management)
+ls -t "$BACKUP_DIR"/defectdojo-backup-*.sql.gz 2>/dev/null | tail -n +8 | xargs -r rm
+
+echo "[$(date)] Backup completed successfully: $BACKUP_FILE"
 BACKUPEOF
 
 sed -i "s/S3_BUCKET_PLACEHOLDER/$S3_BUCKET/g" $APP_DIR/backup.sh
@@ -223,6 +248,110 @@ chmod +x $APP_DIR/backup.sh
 # Setup daily backup cron (3 AM)
 mkdir -p /etc/cron.d
 echo "0 3 * * * root $APP_DIR/backup.sh >> /var/log/defectdojo-backup.log 2>&1" > /etc/cron.d/defectdojo-backup
+
+# Create backup verification script (restore test)
+echo "Creating backup verification script..."
+cat > $APP_DIR/backup-verify.sh << 'VERIFYEOF'
+#!/bin/bash
+# DefectDojo Backup Verification Script
+# Validates backups by restoring to a test database
+
+set -e
+
+S3_BUCKET="S3_BUCKET_PLACEHOLDER"
+SNS_TOPIC_ARN="SNS_TOPIC_PLACEHOLDER"
+WORK_DIR="/tmp/backup-verify"
+TEST_DB="defectdojo_backup_test"
+COMPOSE_FILE="/opt/defectdojo/repo/docker-compose.yml"
+MAX_AGE_HOURS=25
+
+cleanup() {
+    docker compose -f "$COMPOSE_FILE" exec -T postgres \
+        psql -U defectdojo -d postgres -c "DROP DATABASE IF EXISTS $TEST_DB;" 2>/dev/null || true
+    rm -rf "$WORK_DIR"
+}
+
+send_alert() {
+    local message="$1"
+    echo "[$(date)] ALERT: $message"
+    if [ -n "$SNS_TOPIC_ARN" ]; then
+        aws sns publish --topic-arn "$SNS_TOPIC_ARN" \
+            --subject "DefectDojo Backup Verification FAILED" \
+            --message "$message" --region us-east-1 || true
+    fi
+}
+
+verify_backup() {
+    mkdir -p "$WORK_DIR"
+
+    # Find most recent backup
+    LATEST=$(aws s3 ls "s3://$S3_BUCKET/backups/daily/" | sort | tail -1)
+    if [ -z "$LATEST" ]; then
+        send_alert "No backups found in S3"
+        return 1
+    fi
+
+    BACKUP_FILE=$(echo "$LATEST" | awk '{print $4}')
+    BACKUP_DATE=$(echo "$LATEST" | awk '{print $1}')
+    BACKUP_TIME=$(echo "$LATEST" | awk '{print $2}')
+    echo "[$(date)] Found backup: $BACKUP_FILE"
+
+    # Check age
+    BACKUP_EPOCH=$(date -d "$BACKUP_DATE $BACKUP_TIME" +%s)
+    AGE_HOURS=$(( ($(date +%s) - BACKUP_EPOCH) / 3600 ))
+    if [ "$AGE_HOURS" -gt "$MAX_AGE_HOURS" ]; then
+        send_alert "Backup is $AGE_HOURS hours old (threshold: $MAX_AGE_HOURS)"
+        return 1
+    fi
+
+    # Download
+    if ! aws s3 cp "s3://$S3_BUCKET/backups/daily/$BACKUP_FILE" "$WORK_DIR/$BACKUP_FILE"; then
+        send_alert "Failed to download backup: $BACKUP_FILE"
+        return 1
+    fi
+
+    # Create test DB
+    docker compose -f "$COMPOSE_FILE" exec -T postgres \
+        psql -U defectdojo -d postgres -c "DROP DATABASE IF EXISTS $TEST_DB;" || true
+    docker compose -f "$COMPOSE_FILE" exec -T postgres \
+        psql -U defectdojo -d postgres -c "CREATE DATABASE $TEST_DB;"
+
+    # Restore
+    if ! gunzip -c "$WORK_DIR/$BACKUP_FILE" | docker compose -f "$COMPOSE_FILE" exec -T postgres \
+        psql -U defectdojo -d "$TEST_DB" > /dev/null 2>&1; then
+        send_alert "Failed to restore backup: $BACKUP_FILE"
+        return 1
+    fi
+
+    # Validate
+    RESULT=$(docker compose -f "$COMPOSE_FILE" exec -T postgres \
+        psql -U defectdojo -d "$TEST_DB" -t -A -c \
+        "SELECT COUNT(*) FROM dojo_product_type;" 2>&1)
+    if [ "$RESULT" -lt 1 ]; then
+        send_alert "Validation failed: no product types in restored DB"
+        return 1
+    fi
+
+    echo "[$(date)] Backup verification passed! ($RESULT product types found)"
+    return 0
+}
+
+trap cleanup EXIT
+echo "[$(date)] Starting backup verification..."
+if verify_backup; then
+    echo "[$(date)] SUCCESS"
+else
+    echo "[$(date)] FAILED"
+    exit 1
+fi
+VERIFYEOF
+
+sed -i "s/S3_BUCKET_PLACEHOLDER/$S3_BUCKET/g" $APP_DIR/backup-verify.sh
+sed -i "s|SNS_TOPIC_PLACEHOLDER|$SNS_TOPIC_ARN|g" $APP_DIR/backup-verify.sh
+chmod +x $APP_DIR/backup-verify.sh
+
+# Setup backup verification cron (5 AM, after 3 AM backup)
+echo "0 5 * * * root $APP_DIR/backup-verify.sh >> /var/log/defectdojo-backup-verify.log 2>&1" > /etc/cron.d/defectdojo-backup-verify
 
 # Save important info
 echo "Saving deployment info..."

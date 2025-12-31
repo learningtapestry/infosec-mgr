@@ -122,3 +122,9 @@ jobs:
           name: smoke-test-results
           path: tests/test-results/
           retention-days: 7
+
+  verify-backups:
+    name: Verify Backups
+    needs: deploy
+    uses: ./.github/workflows/backup-verify.yml
+    secrets: inherit

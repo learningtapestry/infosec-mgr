@@ -78,3 +78,10 @@ variable "create_key_pair" {
   type        = bool
   default     = false
 }
+
+variable "alert_email" {
+  description = "Email address for infrastructure and backup alerts"
+  type        = string
+  default     = "admins@learningtapestry.com"
+}
+

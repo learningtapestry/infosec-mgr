@@ -23,7 +23,9 @@ resource "aws_s3_bucket_versioning" "backups" {
   }
 }
 
-# Lifecycle rule to clean up old versions
+# Lifecycle rules for tiered backup retention
+# - Daily backups: 30 days
+# - Monthly backups: 180 days (6 months)
 resource "aws_s3_bucket_lifecycle_configuration" "backups" {
   bucket = aws_s3_bucket.backups.id
 
@@ -43,15 +45,28 @@ resource "aws_s3_bucket_lifecycle_configuration" "backups" {
   }
 
   rule {
-    id     = "cleanup-old-backups"
+    id     = "daily-backup-retention"
     status = "Enabled"
 
     filter {
-      prefix = "backups/"
+      prefix = "backups/daily/"
     }
 
     expiration {
-      days = 90
+      days = 30
+    }
+  }
+
+  rule {
+    id     = "monthly-backup-retention"
+    status = "Enabled"
+
+    filter {
+      prefix = "backups/monthly/"
+    }
+
+    expiration {
+      days = 180
     }
   }
 }

@@ -377,11 +377,19 @@ infosec-mgr/
 │   ├── variables.tf
 │   ├── ec2.tf
 │   ├── vpc.tf
-│   ├── s3.tf
+│   ├── s3.tf                        # Backup bucket + lifecycle
+│   ├── alerts.tf                    # SNS topic for backup alerts
+│   ├── iam.tf                       # IAM roles and policies
 │   └── user-data.sh                 # EC2 bootstrap script
 │
+├── scripts/
+│   ├── backup.sh                    # Database backup script
+│   └── backup-verify.sh             # Backup restore verification
+│
 ├── docker/
-│   └── extra_fixtures/              # DefectDojo config-as-code
+│   ├── extra_settings/
+│   │   └── local_settings.py        # DefectDojo config-as-code
+│   └── extra_fixtures/
 │       ├── extra_001_product_types.json
 │       └── extra_002_products.json
 │
@@ -390,6 +398,90 @@ infosec-mgr/
 ├── docker-compose.yml               # DefectDojo deployment
 ├── CLAUDE.md                        # AI assistant instructions
 └── README.md                        # This file
+```
+
+---
+
+## Slack Notifications
+
+DefectDojo supports Slack notifications for security findings. **Notifications are OPT-IN by default** - no alerts are sent unless explicitly configured.
+
+### Setup (Admin - One Time)
+
+1. **Create a Slack App:**
+   - Go to https://api.slack.com/apps
+   - Click "Create New App" → "From scratch"
+   - Name it "DefectDojo" and select your workspace
+
+2. **Enable Incoming Webhooks:**
+   - In your app settings, go to "Incoming Webhooks"
+   - Toggle "Activate Incoming Webhooks" to On
+   - Click "Add New Webhook to Workspace"
+   - Select the channel for security notifications
+   - Copy the webhook URL
+
+3. **Configure DefectDojo:**
+   - Log in as admin
+   - Go to ⚙️ **System Settings** (gear icon, top right)
+   - Paste the webhook URL in "Slack Webhook URL"
+   - Save
+
+### Enabling Notifications (Per Product)
+
+Users must opt-in to receive notifications:
+
+1. Navigate to the Product you want notifications for
+2. Click **Notifications** tab
+3. Check "Slack" for the events you want alerts on
+4. Save
+
+### Available Notification Events
+
+| Event | Description |
+|-------|-------------|
+| Product added | New product created |
+| Engagement added | New engagement started |
+| Test added | New test created |
+| Scan added | New scan uploaded |
+| SLA breach | Finding exceeds SLA threshold |
+| Risk acceptance expiration | Accepted risk is expiring |
+
+---
+
+## Backup System
+
+Automated daily backups with restore verification.
+
+### Schedule
+
+| Job | Time (UTC) | Purpose |
+|-----|------------|---------|
+| `backup.sh` | 3:00 AM | Create backup, upload to S3 |
+| `backup-verify.sh` | 5:00 AM | Download, restore to test DB, validate |
+
+### Retention
+
+| Tier | Location | Retention |
+|------|----------|-----------|
+| Daily | `s3://infosec-mgr-backups-*/backups/daily/` | 30 days |
+| Monthly | `s3://infosec-mgr-backups-*/backups/monthly/` | 6 months |
+
+### Alerts
+
+Backup failures trigger SNS alerts to `admins@learningtapestry.com`. Confirm the SNS subscription when you receive the AWS confirmation email.
+
+### Manual Operations
+
+```bash
+# Trigger manual backup
+sudo /opt/defectdojo/backup.sh
+
+# Run backup verification
+sudo /opt/defectdojo/backup-verify.sh
+
+# View backup logs
+tail -f /var/log/defectdojo-backup.log
+tail -f /var/log/defectdojo-backup-verify.log
 ```
 
 ---

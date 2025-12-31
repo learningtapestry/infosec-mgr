@@ -63,6 +63,7 @@ resource "aws_instance" "defectdojo" {
     domain_name    = var.domain_name
     admin_password = var.defectdojo_admin_password
     s3_bucket      = aws_s3_bucket.backups.id
+    sns_topic_arn  = aws_sns_topic.alerts.arn
   })
 
   tags = {

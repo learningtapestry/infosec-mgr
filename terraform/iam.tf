@@ -48,6 +48,28 @@ resource "aws_iam_role_policy" "s3_backup" {
   })
 }
 
+# IAM policy for SNS alert publishing
+resource "aws_iam_role_policy" "sns_alerts" {
+  name = "defectdojo-sns-alerts"
+  role = aws_iam_role.defectdojo.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "SNSPublish"
+        Effect = "Allow"
+        Action = [
+          "sns:Publish"
+        ]
+        Resource = [
+          aws_sns_topic.alerts.arn
+        ]
+      }
+    ]
+  })
+}
+
 # Instance profile
 resource "aws_iam_instance_profile" "defectdojo" {
   name = "defectdojo-instance-profile"
