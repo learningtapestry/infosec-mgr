@@ -3,7 +3,7 @@ name: Deploy Application
 on:
   push:
     branches:
-      - main
+      - production
     paths-ignore:
       - 'terraform/**'
       - 'tests/**'
@@ -51,8 +51,8 @@ jobs:
             git config --global --add safe.directory ${{ env.APP_DIR }}
 
             echo "Pulling latest code..."
-            git fetch origin main
-            git reset --hard origin/main
+            git fetch origin production
+            git reset --hard origin/production
 
             echo "Pulling latest Docker images..."
             docker compose pull

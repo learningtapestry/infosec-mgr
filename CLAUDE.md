@@ -15,6 +15,24 @@ Central security scanning infrastructure for Learning Tapestry. This repo provid
 
 When asked to configure anything, you MUST create/modify files rather than provide UI instructions. The UI is only acceptable for viewing/triaging findings and generating reports.
 
+## Git Workflow
+
+**Code flows: local main → origin/main → PR to production → merge → deploy**
+
+```
+┌─────────────┐     push      ┌─────────────┐      PR       ┌──────────────┐     auto      ┌─────────────┐
+│ local main  │ ───────────▶  │ origin/main │  ──────────▶  │  production  │  ──────────▶  │  EC2 server │
+└─────────────┘               └─────────────┘               └──────────────┘               └─────────────┘
+```
+
+**RESTRICTIONS (ask user for permission before violating):**
+- Do NOT push directly to the `production` branch
+- Do NOT checkout or track `production` locally
+- Do NOT use `git push --force` on any remote branch
+- All production deployments MUST go through a PR from `main`
+
+The `deploy-app.yml` workflow triggers on push to `production` branch only.
+
 ## Commands
 
 ### Local Development
@@ -67,7 +85,7 @@ Other repos call these with `uses: learningtapestry/infosec-mgr/.github/workflow
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `deploy-infra.yml` | Manual | Terraform apply |
-| `deploy-app.yml` | Push to main | SSH deploy + smoke tests |
+| `deploy-app.yml` | Push to production | SSH deploy + smoke tests |
 | `destroy-infra.yml` | Manual | Terraform destroy |
 | `self-scan.yml` | Push/PR/weekly | Dogfooding - scans this repo |
 
