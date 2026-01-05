@@ -113,7 +113,23 @@ ssh -i ~/.ssh/infosec-key.pem ec2-user@54.86.136.184
 cd /opt/defectdojo/repo && docker compose logs -f
 sudo /opt/defectdojo/backup.sh           # Manual backup
 sudo /opt/defectdojo/backup-verify.sh    # Test backup restore
+sudo /opt/defectdojo/restart.sh          # Manual restart
 ```
+
+## Scheduled Maintenance
+
+**Daily restart at 10:00 UTC (2am Pacific PST / 3am PDT)**
+
+The Docker stack is restarted daily to ensure a clean state and prevent Docker networking issues (DNS resolution failures between containers).
+
+| Time (UTC) | Task | Notes |
+|------------|------|-------|
+| 00:00, 12:00 | Certbot renewal | SSL certificate check |
+| 03:00 | Database backup | Uploads to S3 |
+| 05:00 | Backup verification | Restore test |
+| **10:00** | **Stack restart** | **~60 sec downtime** |
+
+**DO NOT schedule cron jobs between 10:00-10:02 UTC** - the stack is restarting during this window.
 
 ## Adding New Products
 

@@ -353,6 +353,41 @@ chmod +x $APP_DIR/backup-verify.sh
 # Setup backup verification cron (5 AM, after 3 AM backup)
 echo "0 5 * * * root $APP_DIR/backup-verify.sh >> /var/log/defectdojo-backup-verify.log 2>&1" > /etc/cron.d/defectdojo-backup-verify
 
+# Create daily restart script (prevents Docker networking issues)
+echo "Creating restart script..."
+cat > $APP_DIR/restart.sh << 'RESTARTEOF'
+#!/bin/bash
+# Daily restart to ensure clean state
+# Runs at 10:00 UTC (2am Pacific PST / 3am PDT)
+
+set -e
+
+cd /opt/defectdojo/repo
+
+echo "$(date): Starting scheduled restart"
+
+docker compose down
+docker compose up -d
+
+# Wait for uwsgi to be ready
+sleep 30
+
+# Verify it's actually up
+HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -k https://localhost:8443/login)
+if [ "$HTTP_CODE" = "200" ]; then
+    echo "$(date): Restart complete, service healthy (HTTP $HTTP_CODE)"
+else
+    echo "$(date): WARNING - Service may not be healthy (HTTP $HTTP_CODE)"
+    exit 1
+fi
+RESTARTEOF
+
+chmod +x $APP_DIR/restart.sh
+
+# Setup daily restart cron (10:00 UTC = 2am Pacific PST / 3am PDT)
+# DO NOT schedule other jobs between 10:00-10:02 UTC
+echo "0 10 * * * root $APP_DIR/restart.sh >> /var/log/defectdojo-restart.log 2>&1" > /etc/cron.d/defectdojo-restart
+
 # Save important info
 echo "Saving deployment info..."
 DOMAIN_DISPLAY="None (use Elastic IP)"
