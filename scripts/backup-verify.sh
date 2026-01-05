@@ -22,7 +22,8 @@ TEST_DB="defectdojo_backup_test"
 COMPOSE_FILE="/opt/defectdojo/repo/docker-compose.yml"
 MAX_AGE_HOURS=25
 
-# Cleanup function - always runs
+# Cleanup function - called via trap on EXIT
+# shellcheck disable=SC2329  # Function is invoked indirectly via trap
 cleanup() {
     echo "[$(date)] Cleaning up..."
 
@@ -142,10 +143,8 @@ verify_backup() {
         (SELECT COUNT(*) FROM dojo_test) as tests;
     "
 
-    RESULT=$(docker compose -f "$COMPOSE_FILE" exec -T postgres \
-        psql -U defectdojo -d "$TEST_DB" -t -A -F',' -c "$VALIDATION_QUERY" 2>&1)
-
-    if [ $? -ne 0 ]; then
+    if ! RESULT=$(docker compose -f "$COMPOSE_FILE" exec -T postgres \
+        psql -U defectdojo -d "$TEST_DB" -t -A -F',' -c "$VALIDATION_QUERY" 2>&1); then
         send_alert "Failed to run validation queries on restored database. Error: $RESULT"
         return 1
     fi

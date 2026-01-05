@@ -39,7 +39,7 @@ if [ "$DAY_OF_MONTH" = "01" ]; then
 fi
 
 # Keep only last 7 local backups (local disk space management)
-ls -t "$BACKUP_DIR"/defectdojo-backup-*.sql.gz 2>/dev/null | tail -n +8 | xargs -r rm
+find "$BACKUP_DIR" -name "defectdojo-backup-*.sql.gz" -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | tail -n +8 | cut -d' ' -f2- | xargs -r rm
 
 echo "[$(date)] Backup completed successfully: $BACKUP_FILE"
 

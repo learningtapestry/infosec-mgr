@@ -23,7 +23,7 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 # Wait for DefectDojo to be ready
 wait_for_dojo() {
     log_info "Waiting for DefectDojo to be ready..."
-    for i in {1..60}; do
+    for _ in {1..60}; do
         if curl -s "${DOJO_URL}/login" > /dev/null 2>&1; then
             log_info "DefectDojo is ready!"
             return 0
