@@ -9,11 +9,16 @@ set -e
 exec > >(tee /var/log/user-data.log) 2>&1
 echo "Starting DefectDojo bootstrap at $(date)"
 
-# Variables from Terraform template
+# Variables from Terraform template (substituted at deploy time, not shell variables)
+# shellcheck disable=SC2154
 GITHUB_REPO="${github_repo}"
+# shellcheck disable=SC2154
 DOMAIN_NAME="${domain_name}"
+# shellcheck disable=SC2154
 ADMIN_PASSWORD="${admin_password}"
+# shellcheck disable=SC2154
 S3_BUCKET="${s3_bucket}"
+# shellcheck disable=SC2154
 SNS_TOPIC_ARN="${sns_topic_arn}"
 
 # Create application directory
