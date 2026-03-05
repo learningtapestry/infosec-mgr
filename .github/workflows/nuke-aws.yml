@@ -1,0 +1,239 @@
+name: Nuke All AWS Resources
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "nuke" to confirm deletion of ALL AWS resources'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  validate:
+    name: Validate Confirmation
+    runs-on: ubuntu-latest
+    outputs:
+      confirmed: ${{ steps.check.outputs.confirmed }}
+    steps:
+      - name: Check confirmation
+        id: check
+        run: |
+          if [ "${{ inputs.confirm }}" = "nuke" ]; then
+            echo "confirmed=true" >> $GITHUB_OUTPUT
+          else
+            echo "::error::You must type 'nuke' to confirm. Got: '${{ inputs.confirm }}'"
+            exit 1
+          fi
+
+  nuke:
+    name: Delete All AWS Resources
+    needs: validate
+    if: needs.validate.outputs.confirmed == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Identify resources
+        id: discover
+        run: |
+          echo "## Resource Discovery" >> $GITHUB_STEP_SUMMARY
+
+          # Find EC2 instances tagged with Project=infosec-mgr
+          INSTANCE_IDS=$(aws ec2 describe-instances \
+            --filters "Name=tag:Project,Values=infosec-mgr" "Name=instance-state-name,Values=running,stopped,pending" \
+            --query 'Reservations[].Instances[].InstanceId' --output text)
+          echo "EC2 Instances: ${INSTANCE_IDS:-none}"
+          echo "instance_ids=${INSTANCE_IDS}" >> $GITHUB_OUTPUT
+
+          # Find S3 bucket
+          BUCKET=$(aws s3api list-buckets --query 'Buckets[?starts_with(Name, `infosec-mgr-backups`)].Name' --output text)
+          echo "S3 Bucket: ${BUCKET:-none}"
+          echo "bucket=${BUCKET}" >> $GITHUB_OUTPUT
+
+          # Find EIPs tagged with Project=infosec-mgr
+          EIPS=$(aws ec2 describe-addresses \
+            --filters "Name=tag:Project,Values=infosec-mgr" \
+            --query 'Addresses[].AllocationId' --output text)
+          echo "Elastic IPs: ${EIPS:-none}"
+          echo "eips=${EIPS}" >> $GITHUB_OUTPUT
+
+          # Find VPCs tagged with Project=infosec-mgr
+          VPCS=$(aws ec2 describe-vpcs \
+            --filters "Name=tag:Project,Values=infosec-mgr" \
+            --query 'Vpcs[].VpcId' --output text)
+          echo "VPCs: ${VPCS:-none}"
+          echo "vpcs=${VPCS}" >> $GITHUB_OUTPUT
+
+          # Find SNS topics
+          SNS_ARNS=$(aws sns list-topics --query 'Topics[].TopicArn' --output text | tr '\t' '\n' | grep infosec-mgr || true)
+          echo "SNS Topics: ${SNS_ARNS:-none}"
+          echo "sns_arns=${SNS_ARNS}" >> $GITHUB_OUTPUT
+
+          # Find IAM roles
+          IAM_ROLES=$(aws iam list-roles --query 'Roles[?starts_with(RoleName, `defectdojo`)].RoleName' --output text)
+          echo "IAM Roles: ${IAM_ROLES:-none}"
+          echo "iam_roles=${IAM_ROLES}" >> $GITHUB_OUTPUT
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource | IDs |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| EC2 | ${INSTANCE_IDS:-none} |" >> $GITHUB_STEP_SUMMARY
+          echo "| S3 | ${BUCKET:-none} |" >> $GITHUB_STEP_SUMMARY
+          echo "| EIP | ${EIPS:-none} |" >> $GITHUB_STEP_SUMMARY
+          echo "| VPC | ${VPCS:-none} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SNS | ${SNS_ARNS:-none} |" >> $GITHUB_STEP_SUMMARY
+          echo "| IAM | ${IAM_ROLES:-none} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Terminate EC2 instances
+        if: steps.discover.outputs.instance_ids != ''
+        run: |
+          for ID in ${{ steps.discover.outputs.instance_ids }}; do
+            echo "Terminating EC2 instance: $ID"
+            # Disable termination protection if set
+            aws ec2 modify-instance-attribute --instance-id "$ID" --no-disable-api-termination 2>/dev/null || true
+            aws ec2 terminate-instances --instance-ids "$ID"
+          done
+          echo "Waiting for instances to terminate..."
+          aws ec2 wait instance-terminated --instance-ids ${{ steps.discover.outputs.instance_ids }}
+          echo "EC2 instances terminated"
+
+      - name: Delete S3 bucket
+        if: steps.discover.outputs.bucket != ''
+        run: |
+          BUCKET="${{ steps.discover.outputs.bucket }}"
+          echo "Emptying S3 bucket: $BUCKET"
+          # Delete all object versions (needed because versioning is enabled)
+          aws s3api list-object-versions --bucket "$BUCKET" --query 'Versions[].{Key:Key,VersionId:VersionId}' --output json 2>/dev/null | \
+            jq -c '.[]? // empty' | while read -r obj; do
+              KEY=$(echo "$obj" | jq -r '.Key')
+              VID=$(echo "$obj" | jq -r '.VersionId')
+              aws s3api delete-object --bucket "$BUCKET" --key "$KEY" --version-id "$VID"
+            done
+          # Delete all delete markers
+          aws s3api list-object-versions --bucket "$BUCKET" --query 'DeleteMarkers[].{Key:Key,VersionId:VersionId}' --output json 2>/dev/null | \
+            jq -c '.[]? // empty' | while read -r obj; do
+              KEY=$(echo "$obj" | jq -r '.Key')
+              VID=$(echo "$obj" | jq -r '.VersionId')
+              aws s3api delete-object --bucket "$BUCKET" --key "$KEY" --version-id "$VID"
+            done
+          echo "Deleting bucket: $BUCKET"
+          aws s3 rb "s3://$BUCKET" --force
+          echo "S3 bucket deleted"
+
+      - name: Release Elastic IPs
+        if: steps.discover.outputs.eips != ''
+        run: |
+          for EIP in ${{ steps.discover.outputs.eips }}; do
+            echo "Disassociating EIP: $EIP"
+            ASSOC=$(aws ec2 describe-addresses --allocation-ids "$EIP" --query 'Addresses[0].AssociationId' --output text)
+            if [ "$ASSOC" != "None" ] && [ -n "$ASSOC" ]; then
+              aws ec2 disassociate-address --association-id "$ASSOC"
+            fi
+            echo "Releasing EIP: $EIP"
+            aws ec2 release-address --allocation-id "$EIP"
+          done
+          echo "Elastic IPs released"
+
+      - name: Delete SNS topics
+        if: steps.discover.outputs.sns_arns != ''
+        run: |
+          for ARN in ${{ steps.discover.outputs.sns_arns }}; do
+            echo "Deleting SNS topic: $ARN"
+            aws sns delete-topic --topic-arn "$ARN"
+          done
+          echo "SNS topics deleted"
+
+      - name: Delete IAM resources
+        if: steps.discover.outputs.iam_roles != ''
+        run: |
+          for ROLE in ${{ steps.discover.outputs.iam_roles }}; do
+            echo "Cleaning up IAM role: $ROLE"
+            # Delete inline policies
+            for POLICY in $(aws iam list-role-policies --role-name "$ROLE" --query 'PolicyNames[]' --output text); do
+              aws iam delete-role-policy --role-name "$ROLE" --policy-name "$POLICY"
+            done
+            # Detach managed policies
+            for POLICY_ARN in $(aws iam list-attached-role-policies --role-name "$ROLE" --query 'AttachedPolicies[].PolicyArn' --output text); do
+              aws iam detach-role-policy --role-name "$ROLE" --policy-arn "$POLICY_ARN"
+            done
+            # Remove from instance profiles
+            for PROFILE in $(aws iam list-instance-profiles-for-role --role-name "$ROLE" --query 'InstanceProfiles[].InstanceProfileName' --output text); do
+              aws iam remove-role-from-instance-profile --instance-profile-name "$PROFILE" --role-name "$ROLE"
+              aws iam delete-instance-profile --instance-profile-name "$PROFILE"
+            done
+            aws iam delete-role --role-name "$ROLE"
+          done
+          echo "IAM resources deleted"
+
+      - name: Delete VPC and networking
+        if: steps.discover.outputs.vpcs != ''
+        run: |
+          for VPC_ID in ${{ steps.discover.outputs.vpcs }}; do
+            echo "Cleaning up VPC: $VPC_ID"
+
+            # Delete NAT Gateways
+            for NGW in $(aws ec2 describe-nat-gateways --filter "Name=vpc-id,Values=$VPC_ID" "Name=state,Values=available" --query 'NatGateways[].NatGatewayId' --output text); do
+              aws ec2 delete-nat-gateway --nat-gateway-id "$NGW"
+            done
+
+            # Delete network interfaces
+            for ENI in $(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$VPC_ID" --query 'NetworkInterfaces[].NetworkInterfaceId' --output text); do
+              ATTACH=$(aws ec2 describe-network-interfaces --network-interface-ids "$ENI" --query 'NetworkInterfaces[0].Attachment.AttachmentId' --output text)
+              if [ "$ATTACH" != "None" ] && [ -n "$ATTACH" ]; then
+                aws ec2 detach-network-interface --attachment-id "$ATTACH" --force 2>/dev/null || true
+                sleep 2
+              fi
+              aws ec2 delete-network-interface --network-interface-id "$ENI" 2>/dev/null || true
+            done
+
+            # Delete security groups (non-default)
+            for SG in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text); do
+              echo "Deleting security group: $SG"
+              aws ec2 delete-security-group --group-id "$SG"
+            done
+
+            # Delete subnets
+            for SUBNET in $(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[].SubnetId' --output text); do
+              echo "Deleting subnet: $SUBNET"
+              aws ec2 delete-subnet --subnet-id "$SUBNET"
+            done
+
+            # Delete route table associations and tables (non-main)
+            for RT in $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' --output text); do
+              for ASSOC in $(aws ec2 describe-route-tables --route-table-ids "$RT" --query 'RouteTables[0].Associations[?!Main].RouteTableAssociationId' --output text); do
+                aws ec2 disassociate-route-table --association-id "$ASSOC"
+              done
+              aws ec2 delete-route-table --route-table-id "$RT"
+            done
+
+            # Detach and delete internet gateways
+            for IGW in $(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" --query 'InternetGateways[].InternetGatewayId' --output text); do
+              echo "Detaching and deleting IGW: $IGW"
+              aws ec2 detach-internet-gateway --internet-gateway-id "$IGW" --vpc-id "$VPC_ID"
+              aws ec2 delete-internet-gateway --internet-gateway-id "$IGW"
+            done
+
+            # Delete VPC
+            echo "Deleting VPC: $VPC_ID"
+            aws ec2 delete-vpc --vpc-id "$VPC_ID"
+          done
+          echo "VPC and networking deleted"
+
+      - name: Delete SSH key pair
+        run: |
+          aws ec2 delete-key-pair --key-name infosec-key 2>/dev/null || true
+          echo "SSH key pair deleted (if it existed)"
+
+      - name: Summary
+        run: |
+          echo "## Nuke Complete" >> $GITHUB_STEP_SUMMARY
+          echo "All infosec-mgr AWS resources have been deleted at $(date)" >> $GITHUB_STEP_SUMMARY
