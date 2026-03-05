@@ -1,0 +1,28 @@
+name: Release EIP
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  release:
+    name: Release Elastic IP
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Release EIP eipalloc-06f24e146d6c650af
+        run: |
+          echo "Releasing EIP eipalloc-06f24e146d6c650af (54.86.136.184)..."
+          aws ec2 release-address --allocation-id eipalloc-06f24e146d6c650af
+          echo "Done."
+
+          echo "Verifying no EIPs remain..."
+          aws ec2 describe-addresses --output json
