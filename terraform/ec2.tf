@@ -30,10 +30,6 @@ resource "aws_eip" "new" {
   tags = {
     Name = "defectdojo-eip"
   }
-
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 # Local values to abstract EIP source

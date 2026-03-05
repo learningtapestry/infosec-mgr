@@ -5,12 +5,10 @@ data "aws_caller_identity" "current" {}
 resource "aws_s3_bucket" "backups" {
   bucket = "infosec-mgr-backups-${data.aws_caller_identity.current.account_id}"
 
+  force_destroy = true
+
   tags = {
     Name = "infosec-mgr-backups"
-  }
-
-  lifecycle {
-    prevent_destroy = true
   }
 }
 
