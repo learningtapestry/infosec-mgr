@@ -378,7 +378,7 @@ docker compose up -d
 sleep 30
 
 # Verify it's actually up
-HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -k https://localhost:8443/login)
+HTTP_CODE=$(curl -s -o /dev/null -w '%%{http_code}' -k https://localhost:8443/login)
 if [ "$HTTP_CODE" = "200" ]; then
     echo "$(date): Restart complete, service healthy (HTTP $HTTP_CODE)"
 else
