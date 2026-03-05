@@ -1,0 +1,79 @@
+name: Audit AWS Resources
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  audit:
+    name: List All AWS Resources
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Audit all resources
+        run: |
+          echo "=== Caller Identity ==="
+          aws sts get-caller-identity
+
+          echo ""
+          echo "=== All Elastic IPs ==="
+          aws ec2 describe-addresses --output json
+
+          echo ""
+          echo "=== All EC2 Instances (non-terminated) ==="
+          aws ec2 describe-instances \
+            --filters "Name=instance-state-name,Values=running,stopped,pending,stopping" \
+            --query 'Reservations[].Instances[].{Id:InstanceId,State:State.Name,Type:InstanceType,Tags:Tags}' \
+            --output json
+
+          echo ""
+          echo "=== All VPCs ==="
+          aws ec2 describe-vpcs --output json
+
+          echo ""
+          echo "=== All S3 Buckets ==="
+          aws s3api list-buckets --output json 2>&1 || true
+
+          echo ""
+          echo "=== All IAM Users ==="
+          aws iam list-users --output json 2>&1 || true
+
+          echo ""
+          echo "=== All IAM Roles (custom only) ==="
+          aws iam list-roles \
+            --query 'Roles[?!starts_with(Path, `/aws-service-role/`)].{RoleName:RoleName,Path:Path}' \
+            --output json 2>&1 || true
+
+          echo ""
+          echo "=== All SNS Topics ==="
+          aws sns list-topics --output json 2>&1 || true
+
+          echo ""
+          echo "=== NAT Gateways ==="
+          aws ec2 describe-nat-gateways \
+            --filter "Name=state,Values=available,pending" \
+            --output json
+
+          echo ""
+          echo "=== EBS Volumes ==="
+          aws ec2 describe-volumes --output json
+
+          echo ""
+          echo "=== Elastic Load Balancers ==="
+          aws elbv2 describe-load-balancers --output json 2>&1 || true
+
+          echo ""
+          echo "=== RDS Instances ==="
+          aws rds describe-db-instances --output json 2>&1 || true
+
+          echo ""
+          echo "=== Key Pairs ==="
+          aws ec2 describe-key-pairs --output json
