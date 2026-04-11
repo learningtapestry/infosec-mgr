@@ -6,19 +6,15 @@ on:
       action:
         description: 'Action to perform'
         required: true
-        default: 'create-with-console'
+        default: 'plan'
         type: choice
         options:
-          - create-with-console
-          - make-public
-          - make-private
-          - delete
+          - plan
+          - apply
+          - show-creds
+          - destroy
       encryption_key:
-        description: 'Passphrase to encrypt credentials (required for create)'
-        required: false
-        type: string
-      console_password:
-        description: 'Console login password for admin user'
+        description: 'Passphrase to encrypt credentials (for show-creds)'
         required: false
         type: string
 
@@ -26,14 +22,18 @@ env:
   AWS_REGION: us-east-1
   S3_BUCKET: infosec-mgr-backups-866795125297
   S3_KEY: gpu-credentials/all-credentials.enc
-  SCOPED_USER: vector-traversal-gpu
-  ADMIN_USER: vector-traversal-admin
 
 jobs:
-  manage-users:
+  terraform:
     name: ${{ inputs.action }}
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -41,136 +41,112 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Create users with console access
-        if: inputs.action == 'create-with-console'
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Import existing resources
+        if: inputs.action == 'plan' || inputs.action == 'apply'
+        run: |
+          # Import any existing resources so terraform doesn't try to recreate them
+          # These may or may not exist from prior workflow runs
+          terraform import aws_iam_user.gpu_scoped vector-traversal-gpu 2>/dev/null || true
+          terraform import aws_iam_user.gpu_admin vector-traversal-admin 2>/dev/null || true
+          # Access keys and policies can't be easily imported, terraform will recreate them
+
+      - name: Terraform Plan
+        if: inputs.action == 'plan' || inputs.action == 'apply'
+        run: |
+          terraform plan \
+            -target=aws_iam_user.gpu_scoped \
+            -target=aws_iam_access_key.gpu_scoped \
+            -target=aws_iam_user_policy.gpu_scoped \
+            -target=aws_iam_user.gpu_admin \
+            -target=aws_iam_access_key.gpu_admin \
+            -target=aws_iam_user_policy_attachment.gpu_admin
+
+      - name: Terraform Apply
+        if: inputs.action == 'apply'
+        run: |
+          terraform apply -auto-approve \
+            -target=aws_iam_user.gpu_scoped \
+            -target=aws_iam_access_key.gpu_scoped \
+            -target=aws_iam_user_policy.gpu_scoped \
+            -target=aws_iam_user.gpu_admin \
+            -target=aws_iam_access_key.gpu_admin \
+            -target=aws_iam_user_policy_attachment.gpu_admin
+
+          echo ""
+          echo "=== Apply complete. Run 'show-creds' to export credentials ==="
+
+      - name: Export credentials
+        if: inputs.action == 'show-creds'
         env:
           ENCRYPTION_KEY: ${{ inputs.encryption_key }}
-          CONSOLE_PASSWORD: ${{ inputs.console_password }}
         run: |
-          set -euo pipefail
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-          echo "=== Ensuring users exist ==="
-          aws iam create-user --user-name "${SCOPED_USER}" 2>/dev/null || echo "${SCOPED_USER} exists"
-          aws iam create-user --user-name "${ADMIN_USER}" 2>/dev/null || echo "${ADMIN_USER} exists"
+          SCOPED_AK=$(terraform output -raw gpu_scoped_access_key_id 2>/dev/null || echo "NOT_FOUND")
+          SCOPED_SK=$(terraform output -raw gpu_scoped_secret_key 2>/dev/null || echo "NOT_FOUND")
+          ADMIN_AK=$(terraform output -raw gpu_admin_access_key_id 2>/dev/null || echo "NOT_FOUND")
+          ADMIN_SK=$(terraform output -raw gpu_admin_secret_key 2>/dev/null || echo "NOT_FOUND")
 
-          echo "=== Attaching policies ==="
-          # Scoped user policy
-          aws iam put-user-policy \
-            --user-name "${SCOPED_USER}" \
-            --policy-name "gpu-experiment-policy" \
-            --policy-document '{
-              "Version": "2012-10-17",
-              "Statement": [
-                {
-                  "Sid": "EC2ForGPU",
-                  "Effect": "Allow",
-                  "Action": [
-                    "ec2:RunInstances", "ec2:TerminateInstances",
-                    "ec2:DescribeInstances", "ec2:DescribeInstanceTypes",
-                    "ec2:DescribeImages", "ec2:DescribeKeyPairs",
-                    "ec2:DescribeSecurityGroups", "ec2:DescribeSubnets",
-                    "ec2:DescribeVpcs", "ec2:CreateKeyPair", "ec2:DeleteKeyPair",
-                    "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup",
-                    "ec2:AuthorizeSecurityGroupIngress", "ec2:RevokeSecurityGroupIngress",
-                    "ec2:CreateTags", "ec2:DescribeAvailabilityZones",
-                    "ec2:DescribeInstanceStatus"
-                  ],
-                  "Resource": "*"
-                },
-                {
-                  "Sid": "S3ForResults",
-                  "Effect": "Allow",
-                  "Action": ["s3:PutObject", "s3:GetObject", "s3:ListBucket", "s3:DeleteObject"],
-                  "Resource": ["arn:aws:s3:::vector-traversal-*", "arn:aws:s3:::vector-traversal-*/*"]
-                },
-                {
-                  "Sid": "S3CreateBucket",
-                  "Effect": "Allow",
-                  "Action": ["s3:CreateBucket", "s3:PutBucketPolicy", "s3:PutBucketTagging"],
-                  "Resource": "arn:aws:s3:::vector-traversal-*"
-                },
-                {
-                  "Sid": "IAMPassRole",
-                  "Effect": "Allow",
-                  "Action": "iam:PassRole",
-                  "Resource": "*",
-                  "Condition": {"StringEquals": {"iam:PassedToService": "ec2.amazonaws.com"}}
-                }
-              ]
-            }'
+          if [ "${SCOPED_AK}" = "NOT_FOUND" ] || [ "${ADMIN_AK}" = "NOT_FOUND" ]; then
+            echo "ERROR: Credentials not found in terraform state."
+            echo "Run 'apply' first to create the resources."
+            exit 1
+          fi
 
-          # Admin user: full admin
-          aws iam attach-user-policy \
-            --user-name "${ADMIN_USER}" \
-            --policy-arn "arn:aws:iam::aws:policy/AdministratorAccess" 2>/dev/null || echo "Already attached"
+          cat > /tmp/creds.txt << EOF
+          # AWS Credentials — Account ${ACCOUNT_ID} (us-east-1)
+          # Created: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-          echo "=== Creating console login for admin user ==="
-          # Delete existing login profile if any
-          aws iam delete-login-profile --user-name "${ADMIN_USER}" 2>/dev/null || true
+          [vector-traversal-gpu]
+          # Scoped: EC2 + S3 (vector-traversal-* buckets)
+          aws_access_key_id = ${SCOPED_AK}
+          aws_secret_access_key = ${SCOPED_SK}
+          region = us-east-1
 
-          # Create console login
-          aws iam create-login-profile \
-            --user-name "${ADMIN_USER}" \
-            --password "${CONSOLE_PASSWORD}" \
-            --no-password-reset-required
+          [vector-traversal-admin]
+          # FULL ADMIN — AdministratorAccess
+          aws_access_key_id = ${ADMIN_AK}
+          aws_secret_access_key = ${ADMIN_SK}
+          region = us-east-1
 
-          echo ""
-          echo "============================================================"
-          echo "=== SETUP COMPLETE ==="
-          echo "============================================================"
-          echo ""
-          echo "Users created:"
-          echo "  - ${SCOPED_USER} (EC2 + S3 policy attached, no keys yet)"
-          echo "  - ${ADMIN_USER} (AdministratorAccess, console login enabled)"
-          echo ""
-          echo "=== NEXT STEPS ==="
-          echo ""
-          echo "1. Log into AWS Console:"
-          echo "   URL: https://${ACCOUNT_ID}.signin.aws.amazon.com/console"
-          echo "   Username: ${ADMIN_USER}"
-          echo "   Password: (the one you provided)"
-          echo ""
-          echo "2. Once logged in, go to IAM > Users > each user > Security Credentials"
-          echo "   Create Access Keys for BOTH users"
-          echo ""
-          echo "3. Save all credentials to Bitwarden"
-          echo ""
-          echo "The admin user has full permissions to create access keys"
-          echo "for itself and for the scoped GPU user."
-          echo "============================================================"
+          [infosec-deployer]
+          # GitHub Actions deployer (from repo secrets)
+          aws_access_key_id = ${AWS_ACCESS_KEY_ID}
+          aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}
+          region = us-east-1
+          EOF
 
-      - name: Make public
-        if: inputs.action == 'make-public'
+          openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
+            -in /tmp/creds.txt -out /tmp/creds.enc \
+            -pass "pass:${ENCRYPTION_KEY}"
+
+          aws s3 cp /tmp/creds.enc "s3://${S3_BUCKET}/${S3_KEY}"
+          rm -f /tmp/creds.txt /tmp/creds.enc
+
+          echo "Encrypted credentials uploaded to s3://${S3_BUCKET}/${S3_KEY}"
+          echo "Run 'make-public' to download (TODO: add that action)"
+
+      - name: Terraform Destroy
+        if: inputs.action == 'destroy'
         run: |
-          aws s3api put-object-acl --bucket "${S3_BUCKET}" --key "${S3_KEY}" --acl public-read
-          echo "https://${S3_BUCKET}.s3.amazonaws.com/${S3_KEY}"
+          terraform import aws_iam_user.gpu_scoped vector-traversal-gpu 2>/dev/null || true
+          terraform import aws_iam_user.gpu_admin vector-traversal-admin 2>/dev/null || true
 
-      - name: Make private
-        if: inputs.action == 'make-private'
-        run: |
-          aws s3api put-object-acl --bucket "${S3_BUCKET}" --key "${S3_KEY}" --acl private
-          echo "=== Private ==="
+          terraform destroy -auto-approve \
+            -target=aws_iam_access_key.gpu_scoped \
+            -target=aws_iam_user_policy.gpu_scoped \
+            -target=aws_iam_access_key.gpu_admin \
+            -target=aws_iam_user_policy_attachment.gpu_admin \
+            -target=aws_iam_user.gpu_scoped \
+            -target=aws_iam_user.gpu_admin
 
-      - name: Delete users
-        if: inputs.action == 'delete'
-        run: |
-          for USERNAME in "${SCOPED_USER}" "${ADMIN_USER}"; do
-            echo "Deleting ${USERNAME}..."
-            for KEY_ID in $(aws iam list-access-keys --user-name "${USERNAME}" \
-                --query 'AccessKeyMetadata[].AccessKeyId' --output text 2>/dev/null || true); do
-              aws iam delete-access-key --user-name "${USERNAME}" --access-key-id "${KEY_ID}"
-            done
-            for POLICY in $(aws iam list-user-policies --user-name "${USERNAME}" \
-                --query 'PolicyNames[]' --output text 2>/dev/null || true); do
-              aws iam delete-user-policy --user-name "${USERNAME}" --policy-name "${POLICY}"
-            done
-            for POLICY_ARN in $(aws iam list-attached-user-policies --user-name "${USERNAME}" \
-                --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || true); do
-              aws iam detach-user-policy --user-name "${USERNAME}" --policy-arn "${POLICY_ARN}"
-            done
-            aws iam delete-login-profile --user-name "${USERNAME}" 2>/dev/null || true
-            aws iam delete-user --user-name "${USERNAME}" 2>/dev/null || true
-            echo "  Done"
-          done
           aws s3 rm "s3://${S3_BUCKET}/${S3_KEY}" 2>/dev/null || true
+          echo "=== Cleanup complete ==="
