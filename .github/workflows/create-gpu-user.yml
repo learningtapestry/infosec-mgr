@@ -1,0 +1,263 @@
+name: Create GPU Experiment IAM Users
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'create'
+        type: choice
+        options:
+          - create
+          - delete
+          - make-public
+          - make-private
+      encryption_key:
+        description: 'Passphrase to encrypt credentials file'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: us-east-1
+  S3_BUCKET: infosec-mgr-backups-866795125297
+  S3_KEY: gpu-credentials/all-credentials.enc
+  SCOPED_USER: vector-traversal-gpu
+  ADMIN_USER: vector-traversal-admin
+
+jobs:
+  manage-users:
+    name: ${{ inputs.action }} IAM users
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Get account info
+        id: account
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "account_id=${ACCOUNT_ID}" >> $GITHUB_OUTPUT
+          echo "Account: ${ACCOUNT_ID}"
+
+      - name: Create both IAM users
+        if: inputs.action == 'create'
+        run: |
+          ACCOUNT_ID="${{ steps.account.outputs.account_id }}"
+          CREDS_FILE="/tmp/all-credentials.txt"
+
+          cat > "${CREDS_FILE}" << HEADER
+          # ============================================================
+          # Vector Traversal AWS Credentials
+          # Created: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          # Account: ${ACCOUNT_ID}
+          # Region: us-east-1
+          # ============================================================
+          #
+          # TWO USERS:
+          #   1. ${SCOPED_USER} — EC2 + S3 only (for GPU experiments)
+          #   2. ${ADMIN_USER} — Full admin (backup of account access)
+          #
+          # Store both in Bitwarden immediately, then delete this file.
+          # ============================================================
+
+          HEADER
+
+          # --- User 1: Scoped GPU user ---
+          echo "=== Creating scoped user: ${SCOPED_USER} ==="
+          aws iam create-user --user-name "${SCOPED_USER}" 2>/dev/null || echo "User exists"
+
+          cat > /tmp/gpu-policy.json << 'POLICY'
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "EC2ForGPU",
+                "Effect": "Allow",
+                "Action": [
+                  "ec2:RunInstances",
+                  "ec2:TerminateInstances",
+                  "ec2:DescribeInstances",
+                  "ec2:DescribeInstanceTypes",
+                  "ec2:DescribeImages",
+                  "ec2:DescribeKeyPairs",
+                  "ec2:DescribeSecurityGroups",
+                  "ec2:DescribeSubnets",
+                  "ec2:DescribeVpcs",
+                  "ec2:CreateKeyPair",
+                  "ec2:DeleteKeyPair",
+                  "ec2:CreateSecurityGroup",
+                  "ec2:DeleteSecurityGroup",
+                  "ec2:AuthorizeSecurityGroupIngress",
+                  "ec2:RevokeSecurityGroupIngress",
+                  "ec2:CreateTags",
+                  "ec2:DescribeAvailabilityZones",
+                  "ec2:DescribeInstanceStatus"
+                ],
+                "Resource": "*"
+              },
+              {
+                "Sid": "S3ForResults",
+                "Effect": "Allow",
+                "Action": ["s3:PutObject", "s3:GetObject", "s3:ListBucket", "s3:DeleteObject"],
+                "Resource": ["arn:aws:s3:::vector-traversal-*", "arn:aws:s3:::vector-traversal-*/*"]
+              },
+              {
+                "Sid": "S3CreateBucket",
+                "Effect": "Allow",
+                "Action": ["s3:CreateBucket", "s3:PutBucketPolicy", "s3:PutBucketTagging"],
+                "Resource": "arn:aws:s3:::vector-traversal-*"
+              },
+              {
+                "Sid": "IAMPassRole",
+                "Effect": "Allow",
+                "Action": "iam:PassRole",
+                "Resource": "*",
+                "Condition": {"StringEquals": {"iam:PassedToService": "ec2.amazonaws.com"}}
+              }
+            ]
+          }
+          POLICY
+
+          POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/vector-traversal-gpu-policy"
+          aws iam create-policy --policy-name vector-traversal-gpu-policy \
+            --policy-document file:///tmp/gpu-policy.json 2>/dev/null || echo "Policy exists"
+          aws iam attach-user-policy --user-name "${SCOPED_USER}" \
+            --policy-arn "${POLICY_ARN}" 2>/dev/null || echo "Already attached"
+
+          SCOPED_KEYS=$(aws iam create-access-key --user-name "${SCOPED_USER}")
+          SCOPED_AK=$(echo "${SCOPED_KEYS}" | jq -r '.AccessKey.AccessKeyId')
+          SCOPED_SK=$(echo "${SCOPED_KEYS}" | jq -r '.AccessKey.SecretAccessKey')
+
+          cat >> "${CREDS_FILE}" << EOF
+          [${SCOPED_USER}]
+          # Permissions: EC2 (GPU instances), S3 (vector-traversal-* buckets)
+          aws_access_key_id = ${SCOPED_AK}
+          aws_secret_access_key = ${SCOPED_SK}
+          region = us-east-1
+
+          EOF
+
+          echo "Scoped user created: ${SCOPED_AK}"
+
+          # --- User 2: Admin user ---
+          echo "=== Creating admin user: ${ADMIN_USER} ==="
+          aws iam create-user --user-name "${ADMIN_USER}" 2>/dev/null || echo "User exists"
+          aws iam attach-user-policy --user-name "${ADMIN_USER}" \
+            --policy-arn "arn:aws:iam::aws:policy/AdministratorAccess" 2>/dev/null || echo "Already attached"
+
+          ADMIN_KEYS=$(aws iam create-access-key --user-name "${ADMIN_USER}")
+          ADMIN_AK=$(echo "${ADMIN_KEYS}" | jq -r '.AccessKey.AccessKeyId')
+          ADMIN_SK=$(echo "${ADMIN_KEYS}" | jq -r '.AccessKey.SecretAccessKey')
+
+          cat >> "${CREDS_FILE}" << EOF
+          [${ADMIN_USER}]
+          # Permissions: FULL ADMIN — AdministratorAccess
+          # This is your backup account access key. Store in Bitwarden.
+          aws_access_key_id = ${ADMIN_AK}
+          aws_secret_access_key = ${ADMIN_SK}
+          region = us-east-1
+
+          EOF
+
+          echo "Admin user created: ${ADMIN_AK}"
+
+          # --- Also capture the GH Actions credentials for safekeeping ---
+          cat >> "${CREDS_FILE}" << EOF
+          [infosec-mgr-github-actions]
+          # These are the credentials from the GitHub repo secrets.
+          # The same keys used by deploy-infra.yml and other workflows.
+          aws_access_key_id = ${AWS_ACCESS_KEY_ID}
+          aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}
+          region = us-east-1
+          EOF
+
+          # --- Encrypt and upload ---
+          echo "=== Encrypting credentials ==="
+          openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
+            -in "${CREDS_FILE}" \
+            -out "/tmp/all-credentials.enc" \
+            -pass "pass:${{ inputs.encryption_key }}"
+
+          aws s3 cp "/tmp/all-credentials.enc" "s3://${S3_BUCKET}/${S3_KEY}"
+          echo "=== Encrypted credentials uploaded to s3://${S3_BUCKET}/${S3_KEY} ==="
+
+          # Clean up
+          rm -f "${CREDS_FILE}" /tmp/all-credentials.enc /tmp/gpu-policy.json
+
+          echo ""
+          echo "=== SUMMARY ==="
+          echo "Scoped user:  ${SCOPED_USER} (key: ${SCOPED_AK})"
+          echo "Admin user:   ${ADMIN_USER} (key: ${ADMIN_AK})"
+          echo "Credentials:  s3://${S3_BUCKET}/${S3_KEY} (encrypted)"
+          echo ""
+          echo "Next: run 'make-public' action, then download and decrypt."
+
+      - name: Make credentials publicly downloadable
+        if: inputs.action == 'make-public'
+        run: |
+          # Make the single encrypted file publicly readable
+          aws s3api put-object-acl \
+            --bucket "${S3_BUCKET}" \
+            --key "${S3_KEY}" \
+            --acl public-read
+
+          echo "=== File is now public ==="
+          echo "Download URL:"
+          echo "  https://${S3_BUCKET}.s3.amazonaws.com/${S3_KEY}"
+          echo ""
+          echo "Decrypt with:"
+          echo "  openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \\"
+          echo "    -in all-credentials.enc \\"
+          echo "    -out aws-credentials.txt \\"
+          echo "    -pass 'pass:YOUR_ENCRYPTION_KEY'"
+          echo ""
+          echo "!!! Make it private again ASAP with the 'make-private' action !!!"
+
+      - name: Make credentials private again
+        if: inputs.action == 'make-private'
+        run: |
+          aws s3api put-object-acl \
+            --bucket "${S3_BUCKET}" \
+            --key "${S3_KEY}" \
+            --acl private
+
+          echo "=== File is private again ==="
+
+      - name: Delete both IAM users
+        if: inputs.action == 'delete'
+        run: |
+          ACCOUNT_ID="${{ steps.account.outputs.account_id }}"
+
+          for USERNAME in "${SCOPED_USER}" "${ADMIN_USER}"; do
+            echo "=== Deleting: ${USERNAME} ==="
+
+            # Delete access keys
+            for KEY_ID in $(aws iam list-access-keys --user-name "${USERNAME}" \
+                --query 'AccessKeyMetadata[].AccessKeyId' --output text 2>/dev/null); do
+              aws iam delete-access-key --user-name "${USERNAME}" --access-key-id "${KEY_ID}"
+              echo "  Deleted key: ${KEY_ID}"
+            done
+
+            # Detach policies
+            for POLICY_ARN in $(aws iam list-attached-user-policies --user-name "${USERNAME}" \
+                --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null); do
+              aws iam detach-user-policy --user-name "${USERNAME}" --policy-arn "${POLICY_ARN}"
+              echo "  Detached: ${POLICY_ARN}"
+            done
+
+            aws iam delete-user --user-name "${USERNAME}" 2>/dev/null && echo "  User deleted" || echo "  User not found"
+          done
+
+          # Clean up policy
+          POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/vector-traversal-gpu-policy"
+          aws iam delete-policy --policy-arn "${POLICY_ARN}" 2>/dev/null || true
+
+          # Remove credentials from S3
+          aws s3 rm "s3://${S3_BUCKET}/${S3_KEY}" 2>/dev/null || true
+
+          echo "=== Cleanup complete ==="
