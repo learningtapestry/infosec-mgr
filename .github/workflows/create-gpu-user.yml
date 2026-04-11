@@ -6,15 +6,19 @@ on:
       action:
         description: 'Action to perform'
         required: true
-        default: 'create'
+        default: 'create-with-console'
         type: choice
         options:
-          - create
+          - create-with-console
           - make-public
           - make-private
           - delete
       encryption_key:
         description: 'Passphrase to encrypt credentials (required for create)'
+        required: false
+        type: string
+      console_password:
+        description: 'Console login password for admin user'
         required: false
         type: string
 
@@ -37,52 +41,21 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Create users and export credentials
-        if: inputs.action == 'create'
+      - name: Create users with console access
+        if: inputs.action == 'create-with-console'
         env:
           ENCRYPTION_KEY: ${{ inputs.encryption_key }}
+          CONSOLE_PASSWORD: ${{ inputs.console_password }}
         run: |
           set -euo pipefail
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-          # First, grant ourselves iam:CreateAccessKey by adding an inline
-          # policy to the deployer user. The deployer has iam:PutUserPolicy
-          # (it already created users + attached policies) but not CreateAccessKey.
-          CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text)
-          CALLER_USER=$(echo "${CALLER_ARN}" | sed 's|.*/||')
-          echo "Running as: ${CALLER_USER}"
-
-          # Try to self-grant CreateAccessKey permission
-          aws iam put-user-policy \
-            --user-name "${CALLER_USER}" \
-            --policy-name "temp-create-access-keys" \
-            --policy-document '{
-              "Version": "2012-10-17",
-              "Statement": [{
-                "Effect": "Allow",
-                "Action": ["iam:CreateAccessKey", "iam:DeleteAccessKey", "iam:ListAccessKeys"],
-                "Resource": "arn:aws:iam::*:user/vector-traversal-*"
-              }]
-            }'
-
-          echo "Waiting for policy propagation..."
-          sleep 10
-
-          # Clean up users from any previous partial run (delete old keys)
-          for USERNAME in "${SCOPED_USER}" "${ADMIN_USER}"; do
-            for KEY_ID in $(aws iam list-access-keys --user-name "${USERNAME}" \
-                --query 'AccessKeyMetadata[].AccessKeyId' --output text 2>/dev/null || true); do
-              aws iam delete-access-key --user-name "${USERNAME}" --access-key-id "${KEY_ID}" 2>/dev/null || true
-              echo "Deleted old key ${KEY_ID} from ${USERNAME}"
-            done
-          done
-
-          # Ensure users exist (may have been created in prior run)
+          echo "=== Ensuring users exist ==="
           aws iam create-user --user-name "${SCOPED_USER}" 2>/dev/null || echo "${SCOPED_USER} exists"
           aws iam create-user --user-name "${ADMIN_USER}" 2>/dev/null || echo "${ADMIN_USER} exists"
 
-          # Attach policies
-          # Scoped user: inline policy for EC2 + S3
+          echo "=== Attaching policies ==="
+          # Scoped user policy
           aws iam put-user-policy \
             --user-name "${SCOPED_USER}" \
             --policy-name "gpu-experiment-policy" \
@@ -127,86 +100,57 @@ jobs:
               ]
             }'
 
-          # Admin user: AdministratorAccess
+          # Admin user: full admin
           aws iam attach-user-policy \
             --user-name "${ADMIN_USER}" \
             --policy-arn "arn:aws:iam::aws:policy/AdministratorAccess" 2>/dev/null || echo "Already attached"
 
-          # Create access keys
-          echo "=== Creating access keys ==="
-          SCOPED_KEYS=$(aws iam create-access-key --user-name "${SCOPED_USER}")
-          SCOPED_AK=$(echo "${SCOPED_KEYS}" | jq -r '.AccessKey.AccessKeyId')
-          SCOPED_SK=$(echo "${SCOPED_KEYS}" | jq -r '.AccessKey.SecretAccessKey')
-          echo "Scoped key: ${SCOPED_AK}"
+          echo "=== Creating console login for admin user ==="
+          # Delete existing login profile if any
+          aws iam delete-login-profile --user-name "${ADMIN_USER}" 2>/dev/null || true
 
-          ADMIN_KEYS=$(aws iam create-access-key --user-name "${ADMIN_USER}")
-          ADMIN_AK=$(echo "${ADMIN_KEYS}" | jq -r '.AccessKey.AccessKeyId')
-          ADMIN_SK=$(echo "${ADMIN_KEYS}" | jq -r '.AccessKey.SecretAccessKey')
-          echo "Admin key: ${ADMIN_AK}"
-
-          # Build credentials file
-          cat > /tmp/creds.txt << EOF
-          # ============================================================
-          # AWS Credentials — Account ${ACCOUNT_ID} (us-east-1)
-          # Created: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-          # ============================================================
-
-          [vector-traversal-gpu]
-          # Scoped: EC2 + S3 (vector-traversal-* buckets)
-          aws_access_key_id = ${SCOPED_AK}
-          aws_secret_access_key = ${SCOPED_SK}
-          region = us-east-1
-
-          [vector-traversal-admin]
-          # FULL ADMIN — AdministratorAccess
-          aws_access_key_id = ${ADMIN_AK}
-          aws_secret_access_key = ${ADMIN_SK}
-          region = us-east-1
-
-          [infosec-deployer]
-          # GitHub Actions deployer credentials (from repo secrets)
-          aws_access_key_id = ${AWS_ACCESS_KEY_ID}
-          aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}
-          region = us-east-1
-          EOF
-
-          # Encrypt and upload
-          openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
-            -in /tmp/creds.txt -out /tmp/creds.enc \
-            -pass "pass:${ENCRYPTION_KEY}"
-
-          aws s3 cp /tmp/creds.enc "s3://${S3_BUCKET}/${S3_KEY}"
-          rm -f /tmp/creds.txt /tmp/creds.enc
-
-          # Clean up temp policy on deployer
-          aws iam delete-user-policy \
-            --user-name "${CALLER_USER}" \
-            --policy-name "temp-create-access-keys" 2>/dev/null || true
+          # Create console login
+          aws iam create-login-profile \
+            --user-name "${ADMIN_USER}" \
+            --password "${CONSOLE_PASSWORD}" \
+            --no-password-reset-required
 
           echo ""
-          echo "=== DONE ==="
-          echo "Scoped user: ${SCOPED_USER} (${SCOPED_AK})"
-          echo "Admin user:  ${ADMIN_USER} (${ADMIN_AK})"
-          echo "Encrypted creds: s3://${S3_BUCKET}/${S3_KEY}"
-          echo "Next: run 'make-public', download, then 'make-private'"
+          echo "============================================================"
+          echo "=== SETUP COMPLETE ==="
+          echo "============================================================"
+          echo ""
+          echo "Users created:"
+          echo "  - ${SCOPED_USER} (EC2 + S3 policy attached, no keys yet)"
+          echo "  - ${ADMIN_USER} (AdministratorAccess, console login enabled)"
+          echo ""
+          echo "=== NEXT STEPS ==="
+          echo ""
+          echo "1. Log into AWS Console:"
+          echo "   URL: https://${ACCOUNT_ID}.signin.aws.amazon.com/console"
+          echo "   Username: ${ADMIN_USER}"
+          echo "   Password: (the one you provided)"
+          echo ""
+          echo "2. Once logged in, go to IAM > Users > each user > Security Credentials"
+          echo "   Create Access Keys for BOTH users"
+          echo ""
+          echo "3. Save all credentials to Bitwarden"
+          echo ""
+          echo "The admin user has full permissions to create access keys"
+          echo "for itself and for the scoped GPU user."
+          echo "============================================================"
 
-      - name: Make credentials public
+      - name: Make public
         if: inputs.action == 'make-public'
         run: |
           aws s3api put-object-acl --bucket "${S3_BUCKET}" --key "${S3_KEY}" --acl public-read
-          echo "=== DOWNLOAD URL ==="
           echo "https://${S3_BUCKET}.s3.amazonaws.com/${S3_KEY}"
-          echo ""
-          echo "curl -o creds.enc 'https://${S3_BUCKET}.s3.amazonaws.com/${S3_KEY}'"
-          echo "openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 -in creds.enc -out aws-creds.txt -pass 'pass:YOUR_KEY'"
-          echo ""
-          echo "!!! Run 'make-private' ASAP !!!"
 
-      - name: Make credentials private
+      - name: Make private
         if: inputs.action == 'make-private'
         run: |
           aws s3api put-object-acl --bucket "${S3_BUCKET}" --key "${S3_KEY}" --acl private
-          echo "=== File is private ==="
+          echo "=== Private ==="
 
       - name: Delete users
         if: inputs.action == 'delete'
@@ -225,8 +169,8 @@ jobs:
                 --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || true); do
               aws iam detach-user-policy --user-name "${USERNAME}" --policy-arn "${POLICY_ARN}"
             done
+            aws iam delete-login-profile --user-name "${USERNAME}" 2>/dev/null || true
             aws iam delete-user --user-name "${USERNAME}" 2>/dev/null || true
             echo "  Done"
           done
           aws s3 rm "s3://${S3_BUCKET}/${S3_KEY}" 2>/dev/null || true
-          echo "=== Cleanup complete ==="
